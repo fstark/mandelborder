@@ -5,6 +5,7 @@
 #include <cstring>
 #include <vector>
 #include <iostream>
+#include <iomanip>
 
 class MandelbrotRenderer
 {
@@ -38,6 +39,8 @@ private:
 
     std::vector<SDL_Color> palette;
 
+    bool speedMode;
+
     enum Flags
     {
         LOADED = 1,
@@ -46,11 +49,11 @@ private:
 
 public:
     MandelbrotRenderer()
-        : minr(cre - diam * 0.5), mini(cim - diam * 0.5),
-          maxr(cre + diam * 0.5), maxi(cim + diam * 0.5),
+        : minr(cre - diam * 0.5 * WIDTH / HEIGHT), mini(cim - diam * 0.5),
+          maxr(cre + diam * 0.5 * WIDTH / HEIGHT), maxi(cim + diam * 0.5),
           stepr((maxr - minr) / WIDTH), stepi((maxi - mini) / HEIGHT),
           window(nullptr), renderer(nullptr), texture(nullptr),
-          queueHead(0), queueTail(0)
+          queueHead(0), queueTail(0), speedMode(false)
     {
         data.resize(WIDTH * HEIGHT, 0);
         done.resize(WIDTH * HEIGHT, 0);
@@ -244,8 +247,9 @@ public:
 
             scan(p);
 
-            // Update display periodically
-            if (++processed % 1000 == 0)
+            // Update display periodically (skip in speed mode)
+            ++processed;
+            if (!speedMode && processed % 1000 == 0)
             {
                 render();
             }
@@ -264,7 +268,10 @@ public:
             }
         }
 
-        std::cout << "Computation complete! Processed " << processed << " pixels." << std::endl;
+        unsigned totalPixels = WIDTH * HEIGHT;
+        double ratio = (double)processed / totalPixels * 100.0;
+        std::cout << "Computation complete! Processed " << processed << " / " << totalPixels
+                  << " pixels (" << std::fixed << std::setprecision(1) << ratio << "%)" << std::endl;
     }
 
     void render()
@@ -296,8 +303,8 @@ public:
         compute();
         render();
 
-        std::cout << "Press ESC to quit, SPACE to recompute, R to reset zoom" << std::endl;
-        std::cout << "Click and drag to zoom into a region" << std::endl;
+        std::cout << "Press ESC to quit, SPACE to recompute, R to reset zoom, S to toggle speed mode" << std::endl;
+        std::cout << "Click and drag to zoom into a region (SHIFT to zoom out, CTRL for center-based)" << std::endl;
 
         bool running = true;
         SDL_Event event;
@@ -305,6 +312,7 @@ public:
         bool dragging = false;
         int dragStartX = 0, dragStartY = 0;
         int dragEndX = 0, dragEndY = 0;
+        int currentMouseX = 0, currentMouseY = 0;
 
         while (running)
         {
@@ -317,22 +325,86 @@ public:
                     break;
 
                 case SDL_KEYDOWN:
-                    if (event.key.keysym.sym == SDLK_ESCAPE)
+                case SDL_KEYUP:
+                    if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)
                     {
-                        running = false;
+                        if (dragging)
+                        {
+                            // Cancel drag operation
+                            dragging = false;
+                            render(); // Redraw without selection rectangle
+                        }
+                        else
+                        {
+                            running = false;
+                        }
                     }
-                    else if (event.key.keysym.sym == SDLK_SPACE)
+                    else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE)
                     {
                         reset();
                         compute();
                         render();
                     }
-                    else if (event.key.keysym.sym == SDLK_r)
+                    else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_r)
                     {
                         resetZoom();
                         reset();
                         compute();
                         render();
+                    }
+                    else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_s)
+                    {
+                        speedMode = !speedMode;
+                        std::cout << "Speed mode: " << (speedMode ? "ON" : "OFF") << std::endl;
+                    }
+                    else if (dragging && (event.key.keysym.sym == SDLK_LCTRL ||
+                                          event.key.keysym.sym == SDLK_RCTRL))
+                    {
+                        // CTRL pressed/released during drag - redraw rectangle immediately
+                        SDL_RenderClear(renderer);
+                        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+                        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+
+                        SDL_Keymod modState = SDL_GetModState();
+                        bool ctrlPressed = (modState & KMOD_CTRL) != 0;
+
+                        int dx = currentMouseX - dragStartX;
+                        int dy = currentMouseY - dragStartY;
+                        double aspectRatio = (double)WIDTH / HEIGHT;
+                        int rectX, rectY, width, height;
+
+                        if (ctrlPressed)
+                        {
+                            // Center-based
+                            width = std::abs(dx) * 2;
+                            height = std::abs(dy) * 2;
+
+                            if (width / aspectRatio > height)
+                                height = (int)(width / aspectRatio);
+                            else
+                                width = (int)(height * aspectRatio);
+
+                            rectX = dragStartX - width / 2;
+                            rectY = dragStartY - height / 2;
+                        }
+                        else
+                        {
+                            // Corner-based
+                            width = std::abs(dx);
+                            height = std::abs(dy);
+
+                            if (width / aspectRatio > height)
+                                height = (int)(width / aspectRatio);
+                            else
+                                width = (int)(height * aspectRatio);
+
+                            rectX = std::min(dragStartX, currentMouseX);
+                            rectY = std::min(dragStartY, currentMouseY);
+                        }
+
+                        SDL_Rect rect = {rectX, rectY, width, height};
+                        SDL_RenderDrawRect(renderer, &rect);
+                        SDL_RenderPresent(renderer);
                     }
                     break;
 
@@ -351,24 +423,126 @@ public:
                         dragging = false;
                         dragEndX = event.button.x;
                         dragEndY = event.button.y;
-                        zoomToRegion(dragStartX, dragStartY, dragEndX, dragEndY);
-                        reset();
-                        compute();
-                        render();
+
+                        // Check if SHIFT is pressed for zoom out (inverse)
+                        SDL_Keymod modState = SDL_GetModState();
+                        bool shiftPressed = (modState & KMOD_SHIFT) != 0;
+
+                        int x1, y1, x2, y2;
+                        double aspectRatio = (double)WIDTH / HEIGHT;
+
+                        // Check if this was a click (no drag) vs a drag
+                        int dx = dragEndX - dragStartX;
+                        int dy = dragEndY - dragStartY;
+                        int dragDistance = std::abs(dx) + std::abs(dy);
+
+                        if (dragDistance < 5)
+                        {
+                            // Click with no drag - zoom 2x centered on click point
+                            int width = WIDTH / 2;
+                            int height = HEIGHT / 2;
+
+                            x1 = dragStartX - width / 2;
+                            y1 = dragStartY - height / 2;
+                            x2 = x1 + width;
+                            y2 = y1 + height;
+                        }
+                        else
+                        {
+                            // Check if CTRL is pressed for center-based zoom
+                            bool ctrlPressed = (modState & KMOD_CTRL) != 0;
+
+                            if (ctrlPressed)
+                            {
+                                // Center-based zoom
+                                int width = std::abs(dx) * 2;
+                                int height = std::abs(dy) * 2;
+
+                                if (width / aspectRatio > height)
+                                    height = (int)(width / aspectRatio);
+                                else
+                                    width = (int)(height * aspectRatio);
+
+                                x1 = dragStartX - width / 2;
+                                y1 = dragStartY - height / 2;
+                                x2 = x1 + width;
+                                y2 = y1 + height;
+                            }
+                            else
+                            {
+                                // Corner-based zoom
+                                int width = std::abs(dx);
+                                int height = std::abs(dy);
+
+                                if (width / aspectRatio > height)
+                                    height = (int)(width / aspectRatio);
+                                else
+                                    width = (int)(height * aspectRatio);
+
+                                x1 = std::min(dragStartX, dragEndX);
+                                y1 = std::min(dragStartY, dragEndY);
+                                x2 = x1 + width;
+                                y2 = y1 + height;
+                            }
+                        }
+
+                        zoomToRect(x1, y1, x2, y2, shiftPressed);
                     }
                     break;
 
                 case SDL_MOUSEMOTION:
                     if (dragging)
                     {
-                        // Draw selection rectangle
-                        render();
+                        // Track current mouse position
+                        currentMouseX = event.motion.x;
+                        currentMouseY = event.motion.y;
+
+                        // Draw selection rectangle with correct aspect ratio
+                        SDL_RenderClear(renderer);
+                        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
                         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-                        SDL_Rect rect = {
-                            std::min(dragStartX, event.motion.x),
-                            std::min(dragStartY, event.motion.y),
-                            std::abs(event.motion.x - dragStartX),
-                            std::abs(event.motion.y - dragStartY)};
+
+                        // Check if CTRL is pressed for center-based zoom
+                        SDL_Keymod modState = SDL_GetModState();
+                        bool ctrlPressed = (modState & KMOD_CTRL) != 0;
+
+                        int dx = currentMouseX - dragStartX;
+                        int dy = currentMouseY - dragStartY;
+
+                        // Maintain aspect ratio (WIDTH:HEIGHT = 4:3)
+                        double aspectRatio = (double)WIDTH / HEIGHT;
+                        int rectX, rectY, width, height;
+
+                        if (ctrlPressed)
+                        {
+                            // Center-based: rectangle centered on dragStart
+                            width = std::abs(dx) * 2;
+                            height = std::abs(dy) * 2;
+
+                            if (width / aspectRatio > height)
+                                height = (int)(width / aspectRatio);
+                            else
+                                width = (int)(height * aspectRatio);
+
+                            rectX = dragStartX - width / 2;
+                            rectY = dragStartY - height / 2;
+                        }
+                        else
+                        {
+                            // Corner-based: rectangle from dragStart to current position
+                            width = std::abs(dx);
+                            height = std::abs(dy);
+
+                            if (width / aspectRatio > height)
+                                height = (int)(width / aspectRatio);
+                            else
+                                width = (int)(height * aspectRatio);
+
+                            rectX = std::min(dragStartX, currentMouseX);
+                            rectY = std::min(dragStartY, currentMouseY);
+                        }
+
+                        SDL_Rect rect = {rectX, rectY, width, height};
                         SDL_RenderDrawRect(renderer, &rect);
                         SDL_RenderPresent(renderer);
                     }
@@ -424,12 +598,72 @@ public:
 
     void updateBounds()
     {
-        minr = cre - diam * 0.5;
+        minr = cre - diam * 0.5 * WIDTH / HEIGHT;
         mini = cim - diam * 0.5;
-        maxr = cre + diam * 0.5;
+        maxr = cre + diam * 0.5 * WIDTH / HEIGHT;
         maxi = cim + diam * 0.5;
         stepr = (maxr - minr) / WIDTH;
         stepi = (maxi - mini) / HEIGHT;
+    }
+
+    void animateRectToRect(int startX, int startY, int startWidth, int startHeight,
+                           int endX, int endY, int endWidth, int endHeight,
+                           int steps = 15, int frameDelay = 16)
+    {
+        // Skip animation in speed mode
+        if (speedMode)
+            return;
+
+        // Animate rectangle transformation over specified number of steps
+        for (int step = 0; step <= steps; ++step)
+        {
+            double t = (double)step / steps;
+
+            // Interpolate rectangle dimensions
+            int currentX = (int)(startX + (endX - startX) * t);
+            int currentY = (int)(startY + (endY - startY) * t);
+            int currentWidth = (int)(startWidth + (endWidth - startWidth) * t);
+            int currentHeight = (int)(startHeight + (endHeight - startHeight) * t);
+
+            // Redraw the current frame
+            SDL_RenderClear(renderer);
+            SDL_RenderCopy(renderer, texture, nullptr, nullptr);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_Rect rect = {currentX, currentY, currentWidth, currentHeight};
+            SDL_RenderDrawRect(renderer, &rect);
+            SDL_RenderPresent(renderer);
+
+            SDL_Delay(frameDelay);
+        }
+    }
+
+    void zoomToRect(int x1, int y1, int x2, int y2, bool inverse = false)
+    {
+        if (inverse)
+        {
+            // Zoom OUT: animate full screen shrinking to rectangle
+            animateRectToRect(0, 0, WIDTH, HEIGHT, x1, y1, x2 - x1, y2 - y1);
+
+            // Calculate scale and new center
+            double scale = std::max((double)WIDTH / (x2 - x1), (double)HEIGHT / (y2 - y1));
+            int offsetX = (x1 + x2) / 2 - WIDTH / 2;
+            int offsetY = (y1 + y2) / 2 - HEIGHT / 2;
+
+            cre += offsetX * stepr * scale;
+            cim += offsetY * stepi * scale;
+            diam *= scale;
+            updateBounds();
+        }
+        else
+        {
+            // Zoom IN: animate rectangle expanding to full screen
+            animateRectToRect(x1, y1, x2 - x1, y2 - y1, 0, 0, WIDTH, HEIGHT);
+            zoomToRegion(x1, y1, x2, y2);
+        }
+
+        reset();
+        compute();
+        render();
     }
 };
 
