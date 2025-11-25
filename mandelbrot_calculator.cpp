@@ -84,8 +84,8 @@ int MandelbrotCalculator::load(unsigned p)
 
 void MandelbrotCalculator::scan(unsigned p)
 {
-    unsigned x = p % width;
-    unsigned y = p / width;
+    int x = p % width;
+    int y = p / width;
 
     int center = load(p);
 
@@ -128,12 +128,12 @@ void MandelbrotCalculator::compute(std::function<void()> progressCallback)
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // Start by adding screen edges to queue
-    for (unsigned y = 0; y < height; ++y)
+    for (int y = 0; y < height; ++y)
     {
         addQueue(y * width + 0);
         addQueue(y * width + (width - 1));
     }
-    for (unsigned x = 1; x < width - 1; ++x)
+    for (int x = 1; x < width - 1; ++x)
     {
         addQueue(0 * width + x);
         addQueue((height - 1) * width + x);
@@ -159,7 +159,7 @@ void MandelbrotCalculator::compute(std::function<void()> progressCallback)
     }
 
     // Fill uncalculated areas with neighbor color
-    for (unsigned p = 0; p < width * height - 1; ++p)
+    for (int p = 0; p < width * height - 1; ++p)
     {
         if (done[p] & LOADED)
         {
