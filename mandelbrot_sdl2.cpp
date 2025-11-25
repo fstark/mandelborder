@@ -6,6 +6,7 @@
 #include <vector>
 #include <iostream>
 #include <iomanip>
+#include <chrono>
 
 class MandelbrotRenderer
 {
@@ -49,15 +50,14 @@ private:
 
 public:
     MandelbrotRenderer()
-        : minr(cre - diam * 0.5 * WIDTH / HEIGHT), mini(cim - diam * 0.5),
-          maxr(cre + diam * 0.5 * WIDTH / HEIGHT), maxi(cim + diam * 0.5),
-          stepr((maxr - minr) / WIDTH), stepi((maxi - mini) / HEIGHT),
-          window(nullptr), renderer(nullptr), texture(nullptr),
+        : window(nullptr), renderer(nullptr), texture(nullptr),
           queueHead(0), queueTail(0), speedMode(false)
     {
         data.resize(WIDTH * HEIGHT, 0);
         done.resize(WIDTH * HEIGHT, 0);
         queue.resize((WIDTH + HEIGHT) * 4);
+
+        updateBounds(cre, cim, diam);
 
         initSDL();
         generatePalette();
@@ -214,6 +214,9 @@ public:
     {
         std::cout << "Computing Mandelbrot set using boundary tracing..." << std::endl;
 
+        // Start high-precision timer
+        auto startTime = std::chrono::high_resolution_clock::now();
+
         // Start by adding screen edges to queue
         for (unsigned y = 0; y < HEIGHT; ++y)
         {
@@ -268,10 +271,26 @@ public:
             }
         }
 
+        // Stop timer and calculate elapsed time
+        auto endTime = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
+        double milliseconds = duration.count() / 1000.0;
+        double seconds = duration.count() / 1000000.0;
+
         unsigned totalPixels = WIDTH * HEIGHT;
         double ratio = (double)processed / totalPixels * 100.0;
         std::cout << "Computation complete! Processed " << processed << " / " << totalPixels
-                  << " pixels (" << std::fixed << std::setprecision(1) << ratio << "%)" << std::endl;
+                  << " pixels (" << std::fixed << std::setprecision(1) << ratio << "%)";
+
+        if (speedMode)
+        {
+            double processedPixelsPerSec = processed / seconds;
+            double totalPixelsPerSec = totalPixels / seconds;
+            std::cout << " in " << std::fixed << std::setprecision(1) << milliseconds << " ms"
+                      << " (" << std::fixed << std::setprecision(0) << processedPixelsPerSec << " processed px/s"
+                      << ", " << std::fixed << std::setprecision(0) << totalPixelsPerSec << " total px/s)";
+        }
+        std::cout << std::endl;
     }
 
     void render()
@@ -563,10 +582,7 @@ public:
 
     void resetZoom()
     {
-        cre = -0.5;
-        cim = 0.0;
-        diam = 3.0;
-        updateBounds();
+        updateBounds(-0.5, 0.0, 3.0);
     }
 
     void zoomToRegion(int x1, int y1, int x2, int y2)
@@ -586,18 +602,21 @@ public:
         double re2 = minr + x2 * stepr;
         double im2 = mini + y2 * stepi;
 
-        cre = (re1 + re2) / 2.0;
-        cim = (im1 + im2) / 2.0;
-        diam = std::max(re2 - re1, im2 - im1);
+        double new_cre = (re1 + re2) / 2.0;
+        double new_cim = (im1 + im2) / 2.0;
+        double new_diam = std::max(re2 - re1, im2 - im1);
 
-        updateBounds();
+        updateBounds(new_cre, new_cim, new_diam);
 
         std::cout << "Zoomed to: center=(" << cre << ", " << cim
                   << "), diameter=" << diam << std::endl;
     }
 
-    void updateBounds()
+    void updateBounds(double new_cre, double new_cim, double new_diam)
     {
+        cre = new_cre;
+        cim = new_cim;
+        diam = new_diam;
         minr = cre - diam * 0.5 * WIDTH / HEIGHT;
         mini = cim - diam * 0.5;
         maxr = cre + diam * 0.5 * WIDTH / HEIGHT;
@@ -649,10 +668,10 @@ public:
             int offsetX = (x1 + x2) / 2 - WIDTH / 2;
             int offsetY = (y1 + y2) / 2 - HEIGHT / 2;
 
-            cre += offsetX * stepr * scale;
-            cim += offsetY * stepi * scale;
-            diam *= scale;
-            updateBounds();
+            double new_cre = cre + offsetX * stepr * scale;
+            double new_cim = cim + offsetY * stepi * scale;
+            double new_diam = diam * scale;
+            updateBounds(new_cre, new_cim, new_diam);
         }
         else
         {
