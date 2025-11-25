@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iomanip>
 #include <chrono>
+#include <stdexcept>
 
 class MandelbrotRenderer
 {
@@ -55,7 +56,8 @@ public:
     {
         data.resize(WIDTH * HEIGHT, 0);
         done.resize(WIDTH * HEIGHT, 0);
-        queue.resize((WIDTH + HEIGHT) * 4);
+        // Resize to max possible pixels + 1 to prevent ring buffer overflow
+        queue.resize(WIDTH * HEIGHT + 1);
 
         updateBounds(cre, cim, diam);
 
@@ -78,8 +80,7 @@ public:
     {
         if (SDL_Init(SDL_INIT_VIDEO) < 0)
         {
-            std::cerr << "SDL initialization failed: " << SDL_GetError() << std::endl;
-            exit(1);
+            throw std::runtime_error(std::string("SDL initialization failed: ") + SDL_GetError());
         }
 
         window = SDL_CreateWindow(
@@ -89,29 +90,26 @@ public:
 
         if (!window)
         {
-            std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
             SDL_Quit();
-            exit(1);
+            throw std::runtime_error(std::string("Window creation failed: ") + SDL_GetError());
         }
 
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         if (!renderer)
         {
-            std::cerr << "Renderer creation failed: " << SDL_GetError() << std::endl;
             SDL_DestroyWindow(window);
             SDL_Quit();
-            exit(1);
+            throw std::runtime_error(std::string("Renderer creation failed: ") + SDL_GetError());
         }
 
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
                                     SDL_TEXTUREACCESS_STREAMING, WIDTH, HEIGHT);
         if (!texture)
         {
-            std::cerr << "Texture creation failed: " << SDL_GetError() << std::endl;
             SDL_DestroyRenderer(renderer);
             SDL_DestroyWindow(window);
             SDL_Quit();
-            exit(1);
+            throw std::runtime_error(std::string("Texture creation failed: ") + SDL_GetError());
         }
     }
 
@@ -229,24 +227,13 @@ public:
             addQueue((HEIGHT - 1) * WIDTH + x);
         }
 
-        // Process the queue (ring buffer)
-        unsigned flag = 0;
+        // Process the queue (LIFO / Stack behavior)
         unsigned processed = 0;
         while (queueTail != queueHead)
         {
-            unsigned p;
-
-            // Alternate between front and back of queue for better cache locality
-            if (queueHead <= queueTail || ++flag & 3)
-            {
-                p = queue[queueTail++];
-                if (queueTail == queue.size())
-                    queueTail = 0;
-            }
-            else
-            {
-                p = queue[--queueHead];
-            }
+            if (queueHead == 0)
+                queueHead = queue.size();
+            unsigned p = queue[--queueHead];
 
             scan(p);
 
@@ -315,6 +302,46 @@ public:
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, nullptr, nullptr);
         SDL_RenderPresent(renderer);
+    }
+
+    SDL_Rect calculateSelectionRect(int startX, int startY, int endX, int endY, bool centerBased)
+    {
+        int dx = endX - startX;
+        int dy = endY - startY;
+        double aspectRatio = (double)WIDTH / HEIGHT;
+        int width, height, rectX, rectY;
+
+        // Calculate raw dimensions
+        if (centerBased)
+        {
+            width = std::abs(dx) * 2;
+            height = std::abs(dy) * 2;
+        }
+        else
+        {
+            width = std::abs(dx);
+            height = std::abs(dy);
+        }
+
+        // Apply aspect ratio correction
+        if (width / aspectRatio > height)
+            height = (int)(width / aspectRatio);
+        else
+            width = (int)(height * aspectRatio);
+
+        // Calculate top-left position
+        if (centerBased)
+        {
+            rectX = startX - width / 2;
+            rectY = startY - height / 2;
+        }
+        else
+        {
+            rectX = std::min(startX, endX);
+            rectY = std::min(startY, endY);
+        }
+
+        return {rectX, rectY, width, height};
     }
 
     void run()
@@ -387,41 +414,7 @@ public:
                         SDL_Keymod modState = SDL_GetModState();
                         bool ctrlPressed = (modState & KMOD_CTRL) != 0;
 
-                        int dx = currentMouseX - dragStartX;
-                        int dy = currentMouseY - dragStartY;
-                        double aspectRatio = (double)WIDTH / HEIGHT;
-                        int rectX, rectY, width, height;
-
-                        if (ctrlPressed)
-                        {
-                            // Center-based
-                            width = std::abs(dx) * 2;
-                            height = std::abs(dy) * 2;
-
-                            if (width / aspectRatio > height)
-                                height = (int)(width / aspectRatio);
-                            else
-                                width = (int)(height * aspectRatio);
-
-                            rectX = dragStartX - width / 2;
-                            rectY = dragStartY - height / 2;
-                        }
-                        else
-                        {
-                            // Corner-based
-                            width = std::abs(dx);
-                            height = std::abs(dy);
-
-                            if (width / aspectRatio > height)
-                                height = (int)(width / aspectRatio);
-                            else
-                                width = (int)(height * aspectRatio);
-
-                            rectX = std::min(dragStartX, currentMouseX);
-                            rectY = std::min(dragStartY, currentMouseY);
-                        }
-
-                        SDL_Rect rect = {rectX, rectY, width, height};
+                        SDL_Rect rect = calculateSelectionRect(dragStartX, dragStartY, currentMouseX, currentMouseY, ctrlPressed);
                         SDL_RenderDrawRect(renderer, &rect);
                         SDL_RenderPresent(renderer);
                     }
@@ -448,7 +441,6 @@ public:
                         bool shiftPressed = (modState & KMOD_SHIFT) != 0;
 
                         int x1, y1, x2, y2;
-                        double aspectRatio = (double)WIDTH / HEIGHT;
 
                         // Check if this was a click (no drag) vs a drag
                         int dx = dragEndX - dragStartX;
@@ -471,38 +463,11 @@ public:
                             // Check if CTRL is pressed for center-based zoom
                             bool ctrlPressed = (modState & KMOD_CTRL) != 0;
 
-                            if (ctrlPressed)
-                            {
-                                // Center-based zoom
-                                int width = std::abs(dx) * 2;
-                                int height = std::abs(dy) * 2;
-
-                                if (width / aspectRatio > height)
-                                    height = (int)(width / aspectRatio);
-                                else
-                                    width = (int)(height * aspectRatio);
-
-                                x1 = dragStartX - width / 2;
-                                y1 = dragStartY - height / 2;
-                                x2 = x1 + width;
-                                y2 = y1 + height;
-                            }
-                            else
-                            {
-                                // Corner-based zoom
-                                int width = std::abs(dx);
-                                int height = std::abs(dy);
-
-                                if (width / aspectRatio > height)
-                                    height = (int)(width / aspectRatio);
-                                else
-                                    width = (int)(height * aspectRatio);
-
-                                x1 = std::min(dragStartX, dragEndX);
-                                y1 = std::min(dragStartY, dragEndY);
-                                x2 = x1 + width;
-                                y2 = y1 + height;
-                            }
+                            SDL_Rect rect = calculateSelectionRect(dragStartX, dragStartY, dragEndX, dragEndY, ctrlPressed);
+                            x1 = rect.x;
+                            y1 = rect.y;
+                            x2 = x1 + rect.w;
+                            y2 = y1 + rect.h;
                         }
 
                         zoomToRect(x1, y1, x2, y2, shiftPressed);
@@ -525,43 +490,7 @@ public:
                         SDL_Keymod modState = SDL_GetModState();
                         bool ctrlPressed = (modState & KMOD_CTRL) != 0;
 
-                        int dx = currentMouseX - dragStartX;
-                        int dy = currentMouseY - dragStartY;
-
-                        // Maintain aspect ratio (WIDTH:HEIGHT = 4:3)
-                        double aspectRatio = (double)WIDTH / HEIGHT;
-                        int rectX, rectY, width, height;
-
-                        if (ctrlPressed)
-                        {
-                            // Center-based: rectangle centered on dragStart
-                            width = std::abs(dx) * 2;
-                            height = std::abs(dy) * 2;
-
-                            if (width / aspectRatio > height)
-                                height = (int)(width / aspectRatio);
-                            else
-                                width = (int)(height * aspectRatio);
-
-                            rectX = dragStartX - width / 2;
-                            rectY = dragStartY - height / 2;
-                        }
-                        else
-                        {
-                            // Corner-based: rectangle from dragStart to current position
-                            width = std::abs(dx);
-                            height = std::abs(dy);
-
-                            if (width / aspectRatio > height)
-                                height = (int)(width / aspectRatio);
-                            else
-                                width = (int)(height * aspectRatio);
-
-                            rectX = std::min(dragStartX, currentMouseX);
-                            rectY = std::min(dragStartY, currentMouseY);
-                        }
-
-                        SDL_Rect rect = {rectX, rectY, width, height};
+                        SDL_Rect rect = calculateSelectionRect(dragStartX, dragStartY, currentMouseX, currentMouseY, ctrlPressed);
                         SDL_RenderDrawRect(renderer, &rect);
                         SDL_RenderPresent(renderer);
                     }
