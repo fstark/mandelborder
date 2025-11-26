@@ -8,10 +8,13 @@
 #include <ctime>
 
 MandelbrotApp::MandelbrotApp(int w, int h)
-    : width(w), height(h), window(nullptr), renderer(nullptr), texture(nullptr), autoZoomActive(false)
+    : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), autoZoomActive(false)
 {
-    calculator = std::make_unique<MandelbrotCalculator>(width, height);
-    zoomChooser = std::make_unique<ZoomPointChooser>(width, height);
+    calcWidth = width / pixelSize;
+    calcHeight = height / pixelSize;
+
+    calculator = std::make_unique<MandelbrotCalculator>(calcWidth, calcHeight);
+    zoomChooser = std::make_unique<ZoomPointChooser>(calcWidth, calcHeight);
     
     // Initialize random seed first
     srand(static_cast<unsigned>(time(nullptr)));
@@ -59,8 +62,10 @@ void MandelbrotApp::initSDL()
         throw std::runtime_error(std::string("Renderer creation failed: ") + SDL_GetError());
     }
 
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Nearest neighbor scaling
+
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
-                                SDL_TEXTUREACCESS_STREAMING, width, height);
+                                SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
     if (!texture)
     {
         SDL_DestroyRenderer(renderer);
@@ -79,11 +84,11 @@ void MandelbrotApp::render()
 
     const auto &data = calculator->getData();
 
-    for (int y = 0; y < height; ++y)
+    for (int y = 0; y < calcHeight; ++y)
     {
-        for (int x = 0; x < width; ++x)
+        for (int x = 0; x < calcWidth; ++x)
         {
-            int p = y * width + x;
+            int p = y * calcWidth + x;
             int iter = data[p];
 
             if (iter == MandelbrotCalculator::MAX_ITER)
@@ -159,6 +164,47 @@ void MandelbrotApp::resetZoom()
     calculator->updateBounds(-0.5, 0.0, 3.0);
 }
 
+void MandelbrotApp::setPixelSize(int newSize)
+{
+    if (pixelSize == newSize)
+        return;
+
+    // Save current view parameters
+    double currentCre = calculator->getCre();
+    double currentCim = calculator->getCim();
+    double currentDiam = calculator->getDiam();
+    bool currentSpeedMode = calculator->getSpeedMode();
+
+    pixelSize = newSize;
+    calcWidth = width / pixelSize;
+    calcHeight = height / pixelSize;
+
+    // Recreate components
+    calculator = std::make_unique<MandelbrotCalculator>(calcWidth, calcHeight);
+    calculator->updateBounds(currentCre, currentCim, currentDiam);
+    calculator->setSpeedMode(currentSpeedMode);
+
+    zoomChooser = std::make_unique<ZoomPointChooser>(calcWidth, calcHeight);
+
+    // Recreate texture
+    if (texture)
+        SDL_DestroyTexture(texture);
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
+                                SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
+
+    if (!texture)
+    {
+        throw std::runtime_error(std::string("Texture creation failed: ") + SDL_GetError());
+    }
+
+    // Recompute
+    calculator->compute([this]()
+                        { this->render(); });
+    render();
+
+    std::cout << "Pixel size set to: " << pixelSize << " (" << calcWidth << "x" << calcHeight << ")" << std::endl;
+}
+
 void MandelbrotApp::zoomToRegion(int x1, int y1, int x2, int y2)
 {
     if (x1 == x2 || y1 == y2)
@@ -176,10 +222,11 @@ void MandelbrotApp::zoomToRegion(int x1, int y1, int x2, int y2)
     double stepr = calculator->getStepR();
     double stepi = calculator->getStepI();
 
-    double re1 = minr + x1 * stepr;
-    double im1 = mini + y1 * stepi;
-    double re2 = minr + x2 * stepr;
-    double im2 = mini + y2 * stepi;
+    // Adjust for resolution difference between window and calculation
+    double re1 = minr + (x1 / (double)width) * (stepr * calcWidth);
+    double im1 = mini + (y1 / (double)height) * (stepi * calcHeight);
+    double re2 = minr + (x2 / (double)width) * (stepr * calcWidth);
+    double im2 = mini + (y2 / (double)height) * (stepi * calcHeight);
 
     double new_cre = (re1 + re2) / 2.0;
     double new_cim = (im1 + im2) / 2.0;
@@ -260,8 +307,12 @@ void MandelbrotApp::zoomToRect(int x1, int y1, int x2, int y2, bool inverse)
         int offsetX = (x1 + x2) / 2 - width / 2;
         int offsetY = (y1 + y2) / 2 - height / 2;
 
-        double new_cre = calculator->getCre() + offsetX * calculator->getStepR() * scale;
-        double new_cim = calculator->getCim() + offsetY * calculator->getStepI() * scale;
+        // Adjust step size for resolution difference
+        double effectiveStepR = calculator->getStepR() * ((double)calcWidth / width);
+        double effectiveStepI = calculator->getStepI() * ((double)calcHeight / height);
+
+        double new_cre = calculator->getCre() + offsetX * effectiveStepR * scale;
+        double new_cim = calculator->getCim() + offsetY * effectiveStepI * scale;
         double new_diam = calculator->getDiam() * scale;
         calculator->updateBounds(new_cre, new_cim, new_diam);
     }
@@ -340,7 +391,7 @@ void MandelbrotApp::run()
                 {
                     resetZoom();
                     calculator->reset();
-                    calculator->compute([this]()
+                    calculator->compute([this]
                                         { this->render(); });
                     render();
                 }
@@ -360,6 +411,11 @@ void MandelbrotApp::run()
                 {
                     autoZoomActive = !autoZoomActive;
                     std::cout << "Auto-zoom: " << (autoZoomActive ? "ON" : "OFF") << std::endl;
+                }
+                else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_f)
+                {
+                    int newSize = (pixelSize == 1) ? 10 : 1;
+                    setPixelSize(newSize);
                 }
                 else if (dragging && (event.key.keysym.sym == SDLK_LCTRL ||
                                       event.key.keysym.sym == SDLK_RCTRL))
@@ -459,16 +515,22 @@ void MandelbrotApp::run()
         // Auto-zoom functionality
         if (autoZoomActive)
         {
-            // Calculate zoom rectangle dimensions
-            int rectW = width / 4;
-            int rectH = height / 4;
+            // Calculate zoom rectangle dimensions in calculation coordinates
+            int calcRectW = calcWidth / 4;
+            int calcRectH = calcHeight / 4;
 
-            // Find an interesting point to zoom to
-            int centerX, centerY;
+            // Find an interesting point to zoom to (in calculation coordinates)
+            int calcCenterX, calcCenterY;
             zoomChooser->findInterestingPoint(calculator->getData(),
                                               MandelbrotCalculator::MAX_ITER,
-                                              centerX, centerY,
-                                              rectW, rectH);
+                                              calcCenterX, calcCenterY,
+                                              calcRectW, calcRectH);
+
+            // Convert back to window coordinates for display and zooming
+            int rectW = calcRectW * pixelSize;
+            int rectH = calcRectH * pixelSize;
+            int centerX = calcCenterX * pixelSize;
+            int centerY = calcCenterY * pixelSize;
 
             int x1 = centerX - rectW / 2;
             int y1 = centerY - rectH / 2;

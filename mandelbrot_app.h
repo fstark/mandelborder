@@ -18,6 +18,9 @@ public:
 private:
     int width;
     int height;
+    int calcWidth;
+    int calcHeight;
+    int pixelSize;
 
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -41,4 +44,5 @@ private:
                            int steps = 15, int frameDelay = 16);
     void blinkRect(int x, int y, int w, int h, int times = 3, int blinkDelay = 150);
     void resetZoom();
+    void setPixelSize(int newSize);
 };
