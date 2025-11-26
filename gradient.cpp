@@ -1,4 +1,4 @@
-#include "color_palette.h"
+#include "gradient.h"
 #include <cmath>
 #include <algorithm>
 

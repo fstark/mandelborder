@@ -1,5 +1,5 @@
-#ifndef COLOR_PALETTE_H
-#define COLOR_PALETTE_H
+#ifndef GRADIENT_H
+#define GRADIENT_H
 
 #include <SDL2/SDL.h>
 
@@ -36,4 +36,4 @@ public:
     SDL_Color getColor(double t) const override;
 };
 
-#endif // COLOR_PALETTE_H
+#endif // GRADIENT_H

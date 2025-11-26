@@ -5,7 +5,7 @@
 #include <memory>
 #include "mandelbrot_calculator.h"
 #include "zoom_point_chooser.h"
-#include "color_palette.h"
+#include "gradient.h"
 
 class MandelbrotApp
 {
