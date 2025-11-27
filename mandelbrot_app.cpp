@@ -457,7 +457,7 @@ void MandelbrotApp::run()
     }
 
     std::cout << "Press ESC to quit, SPACE to recompute, R to reset zoom, S to toggle speed mode, A for auto-zoom" << std::endl;
-    std::cout << "Press E to switch engine (Border/Standard), P to switch to a random palette, V to toggle verbose mode" << std::endl;
+    std::cout << "Press E to switch engine (Border/Standard/SIMD), P to switch to a random palette, V to toggle verbose mode" << std::endl;
     std::cout << "Click and drag to zoom into a region (SHIFT to zoom out, CTRL for center-based)" << std::endl;
 
     bool running = true;
@@ -566,6 +566,11 @@ void MandelbrotApp::run()
                     {
                         currentEngineType = GridMandelbrotCalculator::EngineType::STANDARD;
                         std::cout << "Switched to STANDARD engine" << std::endl;
+                    }
+                    else if (currentEngineType == GridMandelbrotCalculator::EngineType::STANDARD)
+                    {
+                        currentEngineType = GridMandelbrotCalculator::EngineType::SIMD;
+                        std::cout << "Switched to SIMD engine" << std::endl;
                     }
                     else
                     {

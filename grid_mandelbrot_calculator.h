@@ -13,7 +13,8 @@ class GridMandelbrotCalculator : public StorageMandelbrotCalculator
 public:
     enum class EngineType {
         BORDER,
-        STANDARD
+        STANDARD,
+        SIMD
     };
 
     GridMandelbrotCalculator(int width, int height, int gridRows, int gridCols);

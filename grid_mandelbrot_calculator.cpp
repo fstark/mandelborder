@@ -1,4 +1,5 @@
 #include "grid_mandelbrot_calculator.h"
+#include "simd_mandelbrot_calculator.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -66,6 +67,8 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
         
         if (engineType == EngineType::STANDARD) {
             calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+        } else if (engineType == EngineType::SIMD) {
+            calculator = std::make_unique<SimdMandelbrotCalculator>(tile.width, tile.height);
         } else {
             calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
         }
@@ -73,7 +76,6 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
         // Set explicit bounds for this tile (no aspect ratio adjustment)
         calculator->updateBoundsExplicit(tile.minR, tile.minI, tile.maxR, tile.maxI);
         calculator->setSpeedMode(speedMode);
-        calculator->setVerboseMode(verboseMode);
 
         tiles.push_back(std::move(calculator));
     }
@@ -95,6 +97,8 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
         
         if (engineType == EngineType::STANDARD) {
             calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+        } else if (engineType == EngineType::SIMD) {
+            calculator = std::make_unique<SimdMandelbrotCalculator>(tile.width, tile.height);
         } else {
             calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
         }
@@ -102,7 +106,6 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
         // Set explicit bounds for this tile (no aspect ratio adjustment)
         calculator->updateBoundsExplicit(tile.minR, tile.minI, tile.maxR, tile.maxI);
         calculator->setSpeedMode(speedMode);
-        calculator->setVerboseMode(verboseMode);
 
         tiles.push_back(std::move(calculator));
     }
@@ -150,21 +153,6 @@ void GridMandelbrotCalculator::compositeData()
 
 void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
 {
-    if (verboseMode)
-    {
-        std::cout << "Computing Mandelbrot set using " << gridRows << "x" << gridCols
-                  << " grid (" << (gridRows * gridCols) << " tiles)";
-        
-        if (speedMode)
-        {
-            std::cout << " in parallel mode..." << std::endl;
-        }
-        else
-        {
-            std::cout << " in sequential mode..." << std::endl;
-        }
-    }
-
     auto startTime = std::chrono::high_resolution_clock::now();
 
     unsigned long long totalComposites = 0; // Track how many times we composite
@@ -174,11 +162,6 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
         // PARALLEL MODE: Compute all tiles in parallel using threads
         const int numTiles = gridRows * gridCols;
         const unsigned int numThreads = std::thread::hardware_concurrency();
-        
-        if (verboseMode)
-        {
-            std::cout << "  Using " << numThreads << " threads for " << numTiles << " tiles" << std::endl;
-        }
         
         // Lambda to process a range of tiles
         auto processTiles = [this](int startIdx, int endIdx)
