@@ -9,6 +9,7 @@ int main(int argc, char *argv[])
         // Parse command line arguments
         bool speedMode = false;
         bool exitAfterFirstDisplay = false;
+        bool verboseMode = false;
 
         for (int i = 1; i < argc; ++i)
         {
@@ -22,12 +23,18 @@ int main(int argc, char *argv[])
                 exitAfterFirstDisplay = true;
                 std::cout << "Will exit after first display" << std::endl;
             }
+            else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0)
+            {
+                verboseMode = true;
+                std::cout << "Verbose mode enabled" << std::endl;
+            }
             else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
             {
                 std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
                 std::cout << "Options:" << std::endl;
                 std::cout << "  --speed, -s         Enable speed mode (parallel computation)" << std::endl;
                 std::cout << "  --exit, -e          Exit after first display (for benchmarking)" << std::endl;
+                std::cout << "  --verbose, -v       Enable verbose output (timing info)" << std::endl;
                 std::cout << "  --help, -h          Show this help message" << std::endl;
                 return 0;
             }
@@ -41,6 +48,11 @@ int main(int argc, char *argv[])
         if (exitAfterFirstDisplay)
         {
             app.setExitAfterFirstDisplay(true);
+        }
+
+        if (verboseMode)
+        {
+            app.setVerboseMode(true);
         }
         
         app.run();

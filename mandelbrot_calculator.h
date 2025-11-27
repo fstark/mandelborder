@@ -35,5 +35,9 @@ public:
     virtual void setVerboseMode(bool mode) = 0;
     virtual bool getVerboseMode() const = 0;
 
+    // Rendering (for GPU implementations)
+    virtual bool hasOwnOutput() const { return false; }
+    virtual void render() {}
+
     static constexpr int MAX_ITER = 768;
 };

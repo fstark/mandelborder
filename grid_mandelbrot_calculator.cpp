@@ -1,5 +1,6 @@
 #include "grid_mandelbrot_calculator.h"
 #include "simd_mandelbrot_calculator.h"
+#include "gpu_mandelbrot_calculator.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -69,6 +70,14 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
             calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
         } else if (engineType == EngineType::SIMD) {
             calculator = std::make_unique<SimdMandelbrotCalculator>(tile.width, tile.height);
+        } else if (engineType == EngineType::GPU) {
+            // For GPU, we only want ONE calculator, not a grid.
+            // But if we are in this loop, we are creating tiles.
+            // We'll handle this by making the GPU calculator only for the first tile 
+            // and making others dummy or empty if we are forced to be in a grid.
+            // Ideally, GridMandelbrotCalculator should detect GPU mode and not use tiles.
+            // For now, let's just create it.
+            calculator = std::make_unique<GpuMandelbrotCalculator>(tile.width, tile.height);
         } else {
             calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
         }
@@ -99,6 +108,8 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
             calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
         } else if (engineType == EngineType::SIMD) {
             calculator = std::make_unique<SimdMandelbrotCalculator>(tile.width, tile.height);
+        } else if (engineType == EngineType::GPU) {
+            calculator = std::make_unique<GpuMandelbrotCalculator>(tile.width, tile.height);
         } else {
             calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
         }
@@ -293,7 +304,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
     double milliseconds = duration.count() / 1000.0;
     double seconds = duration.count() / 1000000.0;
 
-    if (verboseMode)
+    if (verboseMode && engineType != EngineType::GPU)
     {
         unsigned totalPixels = width * height;
         double pixelsPerSec = seconds > 0 ? totalPixels / seconds : 0;
@@ -313,5 +324,24 @@ void GridMandelbrotCalculator::setEngineType(EngineType type)
         engineType = type;
         // Re-initialize calculators with new type
         updateBounds(cre, cim, diam);
+    }
+}
+
+bool GridMandelbrotCalculator::hasOwnOutput() const
+{
+    // If any tile has own output (GPU), then the grid has own output
+    if (!tiles.empty() && tiles[0]->hasOwnOutput())
+        return true;
+    return false;
+}
+
+void GridMandelbrotCalculator::render()
+{
+    // If we are in GPU mode, we likely want to render just the first tile 
+    // (assuming we set it up as 1x1 for GPU, or we just render all of them)
+    for (auto &tile : tiles)
+    {
+        if (tile->hasOwnOutput())
+            tile->render();
     }
 }

@@ -16,6 +16,7 @@ public:
 
     void run();
     void setExitAfterFirstDisplay(bool exit);
+    void setVerboseMode(bool verbose);
 
 private:
     int width;
@@ -27,6 +28,7 @@ private:
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
+    SDL_GLContext glContext; // OpenGL context for GPU rendering
 
     std::unique_ptr<MandelbrotCalculator> calculator;
     std::unique_ptr<ZoomPointChooser> zoomChooser;
@@ -39,6 +41,8 @@ private:
     GridMandelbrotCalculator::EngineType currentEngineType;
 
     void initSDL();
+    void switchToOpenGL();
+    void switchToSDLRenderer();
     void createCalculator();
     void render();
     void handleResize(int newWidth, int newHeight);

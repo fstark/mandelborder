@@ -14,7 +14,8 @@ public:
     enum class EngineType {
         BORDER,
         STANDARD,
-        SIMD
+        SIMD,
+        GPU
     };
 
     GridMandelbrotCalculator(int width, int height, int gridRows, int gridCols);
@@ -28,6 +29,10 @@ public:
     
     void setEngineType(EngineType type);
     EngineType getEngineType() const { return engineType; }
+
+    // Override to handle GPU pass-through
+    bool hasOwnOutput() const override;
+    void render() override;
 
 private:
     int gridRows;
