@@ -36,6 +36,7 @@ private:
     bool speedMode;
     bool verboseMode;
     bool exitAfterFirstDisplay;
+    GridMandelbrotCalculator::EngineType currentEngineType;
 
     void initSDL();
     void createCalculator();

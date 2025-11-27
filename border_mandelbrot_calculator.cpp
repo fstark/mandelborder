@@ -6,49 +6,16 @@
 #include <algorithm>
 
 BorderMandelbrotCalculator::BorderMandelbrotCalculator(int w, int h)
-    : width(w), height(h), queueHead(0), queueTail(0), speedMode(false), verboseMode(false)
+    : StorageMandelbrotCalculator(w, h), queueHead(0), queueTail(0)
 {
-    data.resize(width * height, MAX_ITER);
     done.resize(width * height, 0);
     // Resize to max possible pixels + 1 to prevent ring buffer overflow
     queue.resize(width * height + 1);
-
-    // Default initialization
-    updateBounds(-0.5, 0.0, 3.0);
-}
-
-void BorderMandelbrotCalculator::updateBounds(double new_cre, double new_cim, double new_diam)
-{
-    cre = new_cre;
-    cim = new_cim;
-    diam = new_diam;
-    minr = cre - diam * 0.5 * width / height;
-    mini = cim - diam * 0.5;
-    maxr = cre + diam * 0.5 * width / height;
-    maxi = cim + diam * 0.5;
-    stepr = (maxr - minr) / width;
-    stepi = (maxi - mini) / height;
-}
-
-void BorderMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_mini, double new_maxr, double new_maxi)
-{
-    minr = new_minr;
-    mini = new_mini;
-    maxr = new_maxr;
-    maxi = new_maxi;
-    
-    // Calculate center and diameter from the explicit bounds
-    cre = (minr + maxr) / 2.0;
-    cim = (mini + maxi) / 2.0;
-    diam = std::max(maxr - minr, maxi - mini);
-    
-    stepr = (maxr - minr) / width;
-    stepi = (maxi - mini) / height;
 }
 
 void BorderMandelbrotCalculator::reset()
 {
-    std::fill(data.begin(), data.end(), MAX_ITER);
+    StorageMandelbrotCalculator::reset();
     std::fill(done.begin(), done.end(), 0);
     queueHead = queueTail = 0;
 }

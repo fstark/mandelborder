@@ -13,7 +13,7 @@ ifeq ($(UNAME_S),Linux)
 endif
 
 TARGET = mandelbrot_sdl2
-SOURCES = main.cpp mandelbrot_app.cpp border_mandelbrot_calculator.cpp grid_mandelbrot_calculator.cpp zoom_point_chooser.cpp gradient.cpp
+SOURCES = main.cpp mandelbrot_app.cpp border_mandelbrot_calculator.cpp standard_mandelbrot_calculator.cpp grid_mandelbrot_calculator.cpp zoom_point_chooser.cpp gradient.cpp zoom_mandelbrot_calculator.cpp storage_mandelbrot_calculator.cpp
 OBJS = $(SOURCES:.cpp=.o)
 
 all: $(TARGET)

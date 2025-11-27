@@ -8,9 +8,8 @@
 #include <mutex>
 
 GridMandelbrotCalculator::GridMandelbrotCalculator(int w, int h, int rows, int cols)
-    : width(w), height(h), gridRows(rows), gridCols(cols), speedMode(false), verboseMode(false)
+    : StorageMandelbrotCalculator(w, h), gridRows(rows), gridCols(cols), engineType(EngineType::BORDER)
 {
-    unifiedData.resize(width * height, MAX_ITER);
     tileInfos.resize(gridRows * gridCols);
 
     // Create tile calculators (we'll set their dimensions after calculating geometry)
@@ -53,15 +52,7 @@ void GridMandelbrotCalculator::calculateTileGeometry()
 
 void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, double new_diam)
 {
-    cre = new_cre;
-    cim = new_cim;
-    diam = new_diam;
-    minr = cre - diam * 0.5 * width / height;
-    mini = cim - diam * 0.5;
-    maxr = cre + diam * 0.5 * width / height;
-    maxi = cim + diam * 0.5;
-    stepr = (maxr - minr) / width;
-    stepi = (maxi - mini) / height;
+    ZoomMandelbrotCalculator::updateBounds(new_cre, new_cim, new_diam);
 
     // Calculate geometry for all tiles
     calculateTileGeometry();
@@ -71,7 +62,13 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
     for (int i = 0; i < gridRows * gridCols; ++i)
     {
         const TileInfo &tile = tileInfos[i];
-        auto calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
+        std::unique_ptr<MandelbrotCalculator> calculator;
+        
+        if (engineType == EngineType::STANDARD) {
+            calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+        } else {
+            calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
+        }
 
         // Set explicit bounds for this tile (no aspect ratio adjustment)
         calculator->updateBoundsExplicit(tile.minR, tile.minI, tile.maxR, tile.maxI);
@@ -84,18 +81,7 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
 
 void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_mini, double new_maxr, double new_maxi)
 {
-    minr = new_minr;
-    mini = new_mini;
-    maxr = new_maxr;
-    maxi = new_maxi;
-
-    // Calculate center and diameter from the explicit bounds
-    cre = (minr + maxr) / 2.0;
-    cim = (mini + maxi) / 2.0;
-    diam = std::max(maxr - minr, maxi - mini);
-
-    stepr = (maxr - minr) / width;
-    stepi = (maxi - mini) / height;
+    ZoomMandelbrotCalculator::updateBoundsExplicit(new_minr, new_mini, new_maxr, new_maxi);
 
     // Calculate geometry for all tiles
     calculateTileGeometry();
@@ -105,7 +91,13 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
     for (int i = 0; i < gridRows * gridCols; ++i)
     {
         const TileInfo &tile = tileInfos[i];
-        auto calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
+        std::unique_ptr<MandelbrotCalculator> calculator;
+        
+        if (engineType == EngineType::STANDARD) {
+            calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+        } else {
+            calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
+        }
 
         // Set explicit bounds for this tile (no aspect ratio adjustment)
         calculator->updateBoundsExplicit(tile.minR, tile.minI, tile.maxR, tile.maxI);
@@ -118,7 +110,7 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
 
 void GridMandelbrotCalculator::reset()
 {
-    std::fill(unifiedData.begin(), unifiedData.end(), MAX_ITER);
+    StorageMandelbrotCalculator::reset();
     for (auto &tile : tiles)
     {
         tile->reset();
@@ -127,16 +119,11 @@ void GridMandelbrotCalculator::reset()
 
 void GridMandelbrotCalculator::setSpeedMode(bool mode)
 {
-    speedMode = mode;
+    ZoomMandelbrotCalculator::setSpeedMode(mode);
     for (auto &tile : tiles)
     {
         tile->setSpeedMode(mode);
     }
-}
-
-void GridMandelbrotCalculator::setVerboseMode(bool mode)
-{
-    verboseMode = mode;
 }
 
 void GridMandelbrotCalculator::compositeData()
@@ -155,7 +142,7 @@ void GridMandelbrotCalculator::compositeData()
 
             for (int x = 0; x < tile.width; ++x)
             {
-                unifiedData[dstOffset + x] = tileData[srcOffset + x];
+                data[dstOffset + x] = tileData[srcOffset + x];
             }
         }
     }
@@ -249,7 +236,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
                     
                     for (int x = 0; x < tile.width; ++x)
                     {
-                        unifiedData[dstOffset + x] = tileData[srcOffset + x];
+                        data[dstOffset + x] = tileData[srcOffset + x];
                     }
                 }
                 
@@ -272,7 +259,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
 
                 for (int x = 0; x < tile.width; ++x)
                 {
-                    unifiedData[dstOffset + x] = tileData[srcOffset + x];
+                    data[dstOffset + x] = tileData[srcOffset + x];
                 }
             }
 
@@ -311,7 +298,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
 
                 for (int x = 0; x < tile.width; ++x)
                 {
-                    unifiedData[dstOffset + x] = tileData[srcOffset + x];
+                    data[dstOffset + x] = tileData[srcOffset + x];
                 }
             }
         }
@@ -333,5 +320,15 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
                   << std::fixed << std::setprecision(0) << pixelsPerSec << " px/s, "
                   << totalComposites << " composites, "
                   << (gridRows * gridCols) << " tiles)" << std::endl;
+    }
+}
+
+void GridMandelbrotCalculator::setEngineType(EngineType type)
+{
+    if (engineType != type)
+    {
+        engineType = type;
+        // Re-initialize calculators with new type
+        updateBounds(cre, cim, diam);
     }
 }
