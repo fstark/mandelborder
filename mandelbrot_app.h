@@ -34,6 +34,7 @@ private:
 
     void initSDL();
     void render();
+    void handleResize(int newWidth, int newHeight);
 
     // Interaction helpers
     SDL_Rect calculateSelectionRect(int startX, int startY, int endX, int endY, bool centerBased);

@@ -46,7 +46,7 @@ void MandelbrotApp::initSDL()
     window = SDL_CreateWindow(
         "Mandelbrot Set - Boundary Tracing",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        width, height, SDL_WINDOW_SHOWN);
+        width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
     if (!window)
     {
@@ -155,14 +155,14 @@ SDL_Rect MandelbrotApp::calculateSelectionRect(int startX, int startY, int endX,
         // Keep startX, startY as the anchor point
         // Extend the rectangle in the direction of the drag
         if (dx >= 0)
-            rectX = startX;  // Dragging right: anchor is left edge
+            rectX = startX; // Dragging right: anchor is left edge
         else
-            rectX = startX - w;  // Dragging left: anchor is right edge
-        
+            rectX = startX - w; // Dragging left: anchor is right edge
+
         if (dy >= 0)
-            rectY = startY;  // Dragging down: anchor is top edge
+            rectY = startY; // Dragging down: anchor is top edge
         else
-            rectY = startY - h;  // Dragging up: anchor is bottom edge
+            rectY = startY - h; // Dragging up: anchor is bottom edge
     }
 
     return {rectX, rectY, w, h};
@@ -217,6 +217,51 @@ void MandelbrotApp::setPixelSize(int newSize)
     render();
 
     std::cout << "Pixel size set to: " << pixelSize << " (" << calcWidth << "x" << calcHeight << ")" << std::endl;
+}
+
+void MandelbrotApp::handleResize(int newWidth, int newHeight)
+{
+    if (newWidth == width && newHeight == height)
+        return;
+
+    // Save current view parameters
+    double currentCre = calculator->getCre();
+    double currentCim = calculator->getCim();
+    double currentDiam = calculator->getDiam();
+    bool currentSpeedMode = calculator->getSpeedMode();
+
+    // Update dimensions
+    width = newWidth;
+    height = newHeight;
+    calcWidth = width / pixelSize;
+    calcHeight = height / pixelSize;
+
+    // Recreate calculator with new dimensions
+    calculator = std::make_unique<MandelbrotCalculator>(calcWidth, calcHeight);
+    calculator->updateBounds(currentCre, currentCim, currentDiam);
+    calculator->setSpeedMode(currentSpeedMode);
+
+    // Recreate zoom chooser
+    zoomChooser = std::make_unique<ZoomPointChooser>(calcWidth, calcHeight);
+
+    // Recreate texture with new dimensions
+    if (texture)
+        SDL_DestroyTexture(texture);
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
+                                SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
+
+    if (!texture)
+    {
+        throw std::runtime_error(std::string("Texture creation failed: ") + SDL_GetError());
+    }
+
+    // Recompute with new dimensions
+    calculator->compute([this]()
+                        { this->render(); });
+    render();
+
+    std::cout << "Window resized to: " << width << "x" << height 
+              << " (calc: " << calcWidth << "x" << calcHeight << ")" << std::endl;
 }
 
 void MandelbrotApp::zoomToRegion(int x1, int y1, int x2, int y2)
@@ -376,6 +421,13 @@ void MandelbrotApp::run()
             {
             case SDL_QUIT:
                 running = false;
+                break;
+
+            case SDL_WINDOWEVENT:
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED)
+                {
+                    handleResize(event.window.data1, event.window.data2);
+                }
                 break;
 
             case SDL_KEYDOWN:
