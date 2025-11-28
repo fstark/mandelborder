@@ -3,54 +3,58 @@
 #include <vector>
 
 GpuMandelbrotCalculator::GpuMandelbrotCalculator(int w, int h)
-    : ZoomMandelbrotCalculator(w, h), programId(0), vao(0), vbo(0)
+    : ZoomMandelbrotCalculator(w, h), programId(0), vao(0), vbo(0), fbo(0), texture(0)
 {
-    // Initialize dummy data to avoid crashes if someone calls getData()
-    dummyData.resize(1, 0);
+    data.resize(width * height);
     
     // We assume an OpenGL context is already active when this is created
+    
+    // Check if context is active
+    if (!glGetString(GL_VERSION)) {
+        std::cerr << "CRITICAL ERROR: No active OpenGL context in GpuMandelbrotCalculator constructor!" << std::endl;
+    }
+    
+    const char* version = (const char*)glGetString(GL_VERSION);
+    if (version) {
+        std::cout << "GL Version: " << version << std::endl;
+    } else {
+        std::cerr << "Failed to get GL Version" << std::endl;
+    }
+
     initShaders();
     initGeometry();
+    initFBO();
 }
 
 GpuMandelbrotCalculator::~GpuMandelbrotCalculator()
 {
     if (programId) glDeleteProgram(programId);
     if (vbo) glDeleteBuffers(1, &vbo);
-    // VAO deletion might need check for extension support depending on GL version, 
-    // but usually safe in modern GL
-    // glDeleteVertexArrays(1, &vao); 
+    if (fbo) glDeleteFramebuffers(1, &fbo);
+    if (texture) glDeleteTextures(1, &texture);
 }
 
 void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
 {
-    // GPU computes during render, so nothing to do here.
-    // We can just trigger the callback immediately to signal "done".
-    if (progressCallback)
-        progressCallback();
-}
+    if (!programId || !fbo) {
+        std::cerr << "Program or FBO missing." << std::endl;
+        return;
+    }
 
-void GpuMandelbrotCalculator::reset()
-{
-    // Nothing to reset for GPU
-}
-
-void GpuMandelbrotCalculator::render()
-{
-    if (!programId) return;
+    // Bind FBO to render off-screen
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, width, height);
 
     glUseProgram(programId);
 
     // Update uniforms
-    glUniform1f(locMinR, static_cast<float>(minr));
-    glUniform1f(locMinI, static_cast<float>(mini));
-    glUniform1f(locMaxR, static_cast<float>(maxr));
-    glUniform1f(locMaxI, static_cast<float>(maxi));
+    glUniform1d(locMinR, minr);
+    glUniform1d(locMinI, mini);
+    glUniform1d(locMaxR, maxr);
+    glUniform1d(locMaxI, maxi);
     glUniform1i(locMaxIter, MAX_ITER);
 
     // Draw full screen quad
-    // Bind VAO if we used one, or just setup attributes
-    // For simplicity/compatibility, let's use the VBO directly
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
@@ -59,6 +63,86 @@ void GpuMandelbrotCalculator::render()
 
     glDisableVertexAttribArray(0);
     glUseProgram(0);
+    
+    // Read back pixels
+    // We read RGBA unsigned bytes
+    std::vector<uint8_t> pixels(width * height * 4);
+    glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    
+    // Check for GL errors
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        std::cerr << "OpenGL Error during readback: " << err << std::endl;
+    }
+    
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Convert pixels to iteration counts
+    // Shader encodes: R = low byte, G = high byte
+    // Note: OpenGL reads bottom-up, but our shader flips Y, so we might need to adjust or not.
+    // The shader flips Y: float texY = 1.0 - texCoord.y;
+    // This means the image is rendered "upside down" relative to GL coords, which matches CPU top-down?
+    // Let's check:
+    // CPU: y=0 is top.
+    // GL Texture: (0,0) is bottom-left.
+    // Shader: texCoord.y goes 0..1 (bottom to top).
+    // texY = 1.0 - texCoord.y goes 1..0 (top to bottom).
+    // So if we render with this, the top of the image (complex plane minI) corresponds to texCoord.y=1 (top of texture).
+    // glReadPixels reads from bottom row (y=0) to top row.
+    // So the first row in 'pixels' is the bottom of the image.
+    // But our CPU buffer expects y=0 to be top.
+    // So we need to flip Y when reading back.
+
+    for (int y = 0; y < height; ++y)
+    {
+        // Read from bottom-up (GL standard)
+        // Write to top-down (CPU standard)
+        // Actually, if we want to match CPU, we want row 0 to be top.
+        // glReadPixels row 0 is bottom.
+        // So src row y corresponds to dst row (height - 1 - y).
+        
+        const uint8_t* srcRow = &pixels[y * width * 4];
+        int* dstRow = &data[(height - 1 - y) * width];
+
+        for (int x = 0; x < width; ++x)
+        {
+            uint8_t r = srcRow[x * 4 + 0];
+            uint8_t g = srcRow[x * 4 + 1];
+            // uint8_t b = srcRow[x * 4 + 2];
+            
+            // Decode iteration count
+            int iter = r + (g * 256);
+            if (iter > MAX_ITER) iter = MAX_ITER;
+            
+            dstRow[x] = iter;
+        }
+    }
+    
+    if (progressCallback)
+        progressCallback();
+}void GpuMandelbrotCalculator::reset()
+{
+    // Nothing to reset for GPU
+}
+
+void GpuMandelbrotCalculator::initFBO()
+{
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "Framebuffer is not complete!" << std::endl;
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void GpuMandelbrotCalculator::initGeometry()
@@ -79,11 +163,11 @@ void GpuMandelbrotCalculator::initGeometry()
 
 void GpuMandelbrotCalculator::initShaders()
 {
-    // Vertex Shader
+    // Vertex Shader - GLSL 4.0 Core
     const std::string vsSource = R"(
-        #version 120
-        attribute vec2 position;
-        varying vec2 texCoord;
+        #version 400 core
+        in vec2 position;
+        out vec2 texCoord;
         void main() {
             gl_Position = vec4(position, 0.0, 1.0);
             // Map from [-1, 1] to [0, 1]
@@ -91,39 +175,34 @@ void GpuMandelbrotCalculator::initShaders()
         }
     )";
 
-    // Fragment Shader
-    // Note: We use highp float. Double precision (dvec2) requires GLSL 4.0+ (GL 4.0).
-    // For compatibility, we'll stick to float for now.
-    // If the user has a modern GPU, we could use #version 400 and 'double'.
+    // Fragment Shader - GLSL 4.0 Core with Double Precision
+    // Encodes iteration count into RGBA
     const std::string fsSource = R"(
-        #version 120
+        #version 400 core
         
-        uniform float minR;
-        uniform float minI;
-        uniform float maxR;
-        uniform float maxI;
+        uniform double minR;
+        uniform double minI;
+        uniform double maxR;
+        uniform double maxI;
         uniform int maxIter;
         
-        varying vec2 texCoord;
+        in vec2 texCoord;
+        out vec4 fragColor;
         
         void main() {
             // Map texture coordinate [0,1] to complex plane
-            // Flip Y coordinate to match CPU rendering (where 0 is top)
-            float texY = 1.0 - texCoord.y;
+            // Use double precision for the mapping
+            double cx = minR + double(texCoord.x) * (maxR - minR);
+            double cy = minI + double(texCoord.y) * (maxI - minI);
             
-            float cx = minR + texCoord.x * (maxR - minR);
-            float cy = minI + texY * (maxI - minI);
-            
-            float zx = cx;
-            float zy = cy;
+            double zx = 0.0;
+            double zy = 0.0;
+            double zx2 = 0.0;
+            double zy2 = 0.0;
             
             int iter = 0;
-            for (int i = 0; i < 768; ++i) { // Hardcoded maxIter for loop unrolling
-                if (i >= maxIter) break;
-                
-                float zx2 = zx * zx;
-                float zy2 = zy * zy;
-                
+            // We can use a dynamic loop in GLSL 4.0
+            for (int i = 0; i < maxIter; ++i) {
                 if (zx2 + zy2 > 4.0) {
                     iter = i;
                     break;
@@ -131,16 +210,23 @@ void GpuMandelbrotCalculator::initShaders()
                 
                 zy = 2.0 * zx * zy + cy;
                 zx = zx2 - zy2 + cx;
+                zx2 = zx * zx;
+                zy2 = zy * zy;
                 iter = i;
             }
             
-            if (iter == maxIter || iter == 767) {
-                gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-            } else {
-                // Simple coloring based on iteration
-                float t = float(iter) / float(maxIter);
-                gl_FragColor = vec4(t, t * 0.5, 1.0 - t, 1.0);
+            // If we reached the end, it's inside the set
+            if (iter == maxIter - 1 && zx2 + zy2 <= 4.0) {
+                iter = maxIter;
             }
+            
+            // Encode iter into RG channels
+            // R = low byte, G = high byte
+            
+            float r = mod(float(iter), 256.0) / 255.0;
+            float g = floor(float(iter) / 256.0) / 255.0;
+            
+            fragColor = vec4(r, g, 0.0, 1.0);
         }
     )";
 
@@ -150,6 +236,10 @@ void GpuMandelbrotCalculator::initShaders()
     programId = glCreateProgram();
     glAttachShader(programId, vs);
     glAttachShader(programId, fs);
+    
+    // Bind attribute location before linking
+    glBindAttribLocation(programId, 0, "position");
+    
     glLinkProgram(programId);
 
     GLint linked;

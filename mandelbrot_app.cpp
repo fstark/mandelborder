@@ -13,7 +13,7 @@
 #include <SDL2/SDL_opengl.h>
 
 MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
-    : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), glContext(nullptr),
+    : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), glContext(nullptr), ownsGLContext(false),
       autoZoomActive(false), speedMode(speed), verboseMode(false), exitAfterFirstDisplay(false),
       currentEngineType(GridMandelbrotCalculator::EngineType::GPU)
 {
@@ -22,14 +22,54 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
 
     initSDL();
 
-    // Initialize graphics context based on default engine
-    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
+    // Initialize graphics context
+    // We need both SDL Renderer for display and OpenGL context for GPU computation
+    // Create renderer first
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer)
     {
-        switchToOpenGL();
+        // Fallback to software renderer
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+        if (!renderer)
+        {
+            throw std::runtime_error(std::string("Renderer creation failed: ") + SDL_GetError());
+        }
+    }
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
+    if (!texture)
+    {
+        throw std::runtime_error(std::string("Texture creation failed: ") + SDL_GetError());
+    }
+
+    // Create OpenGL context for GPU calculator
+    // Try to use existing context from renderer first
+    glContext = SDL_GL_GetCurrentContext();
+    if (glContext)
+    {
+        std::cout << "Using existing OpenGL context from renderer." << std::endl;
+        ownsGLContext = false;
     }
     else
     {
-        switchToSDLRenderer();
+        std::cout << "No existing context, creating new one." << std::endl;
+        glContext = SDL_GL_CreateContext(window);
+        if (!glContext)
+        {
+            std::cerr << "Warning: Failed to create OpenGL context: " << SDL_GetError() << std::endl;
+        }
+        else
+        {
+            ownsGLContext = true;
+            std::cout << "OpenGL context created successfully." << std::endl;
+            // Make current to ensure it's active for initialization
+            if (SDL_GL_MakeCurrent(window, glContext) < 0) {
+                 std::cerr << "Warning: Failed to make OpenGL context current: " << SDL_GetError() << std::endl;
+            }
+            SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen context
+        }
     }
 
     // Speed mode: 4x4 grid with parallel computation
@@ -71,7 +111,7 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
 
 MandelbrotApp::~MandelbrotApp()
 {
-    if (glContext)
+    if (glContext && ownsGLContext)
         SDL_GL_DeleteContext(glContext);
     if (texture)
         SDL_DestroyTexture(texture);
@@ -103,148 +143,100 @@ void MandelbrotApp::initSDL()
     // We defer renderer/context creation to switchTo... methods
 }
 
-void MandelbrotApp::switchToOpenGL()
+// Removed switchToOpenGL and switchToSDLRenderer as we now use a unified approach
+
+void MandelbrotApp::compute()
 {
-    if (renderer)
-    {
-        SDL_DestroyTexture(texture);
-        texture = nullptr;
-        SDL_DestroyRenderer(renderer);
-        renderer = nullptr;
-    }
+    SDL_GLContext originalContext = SDL_GL_GetCurrentContext();
     
-    if (!glContext)
+    // Only switch if we have a specific GL context for GPU and it's different from current
+    bool needSwitch = (currentEngineType == GridMandelbrotCalculator::EngineType::GPU && glContext && glContext != originalContext);
+
+    if (needSwitch)
     {
-        glContext = SDL_GL_CreateContext(window);
-        if (!glContext)
-        {
-            std::cerr << "Failed to create OpenGL context: " << SDL_GetError() << std::endl;
-            // Fallback?
-        }
         SDL_GL_MakeCurrent(window, glContext);
-        // Enable VSync
-        SDL_GL_SetSwapInterval(1);
-    }
-}
-
-void MandelbrotApp::switchToSDLRenderer()
-{
-    if (glContext)
-    {
-        SDL_GL_DeleteContext(glContext);
-        glContext = nullptr;
     }
 
-    if (!renderer)
+    calculator->compute([this, originalContext, needSwitch]()
+                        {
+                            // If we switched, switch back for render
+                            if (needSwitch)
+                            {
+                                if (originalContext)
+                                    SDL_GL_MakeCurrent(this->window, originalContext);
+                                else
+                                    SDL_GL_MakeCurrent(this->window, NULL);
+                            }
+
+                            this->render();
+
+                            // Switch back to compute context if we are continuing
+                            if (needSwitch)
+                            {
+                                SDL_GL_MakeCurrent(this->window, this->glContext);
+                            }
+                        });
+                        
+    // Restore original context
+    if (needSwitch)
     {
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-        if (!renderer)
-        {
-            // Fallback to software renderer
-            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-            if (!renderer)
-            {
-                throw std::runtime_error(std::string("Renderer creation failed: ") + SDL_GetError());
-            }
-        }
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-        
-        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
-                                    SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
+        if (originalContext)
+            SDL_GL_MakeCurrent(window, originalContext);
+        else
+            SDL_GL_MakeCurrent(window, NULL);
     }
 }
 
 void MandelbrotApp::render()
 {
-    if (calculator->hasOwnOutput())
+    // Ensure GL context is active for GPU computation if needed
+    // But render() is for display. compute() is where the work happens.
+    // Since we read back data, we always use the CPU render path (SDL Renderer)
+    
+    if (!renderer) return;
+    
+    Uint32 *pixels;
+    int pitch;
+
+    SDL_LockTexture(texture, nullptr, (void **)&pixels, &pitch);
+
+    const auto &data = calculator->getData();
+
+    for (int y = 0; y < calcHeight; ++y)
     {
-        // GPU Render Path
-        if (!glContext) switchToOpenGL();
-        
-        // Ensure viewport matches window size
-        glViewport(0, 0, width, height);
-
-        // Clear screen
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        
-        // Render calculator content
-        if (verboseMode)
+        for (int x = 0; x < calcWidth; ++x)
         {
-            // Ensure any previous commands are done for accurate start time
-            glFinish();
-            auto startTime = std::chrono::high_resolution_clock::now();
-            
-            calculator->render();
-            
-            // Ensure rendering is done before stopping timer
-            glFinish();
-            auto endTime = std::chrono::high_resolution_clock::now();
-            
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
-            double milliseconds = duration.count() / 1000.0;
-            double seconds = duration.count() / 1000000.0;
-            
-            unsigned long long totalPixels = (unsigned long long)width * height;
-            double pixelsPerSec = seconds > 0 ? totalPixels / seconds : 0;
-            
-            std::cout << "GPU render complete in " << std::fixed << std::setprecision(1)
-                      << milliseconds << " ms ("
-                      << std::fixed << std::setprecision(0) << pixelsPerSec << " px/s)" << std::endl;
-        }
-        else
-        {
-            calculator->render();
-        }
-        
-        SDL_GL_SwapWindow(window);
-    }
-    else
-    {
-        // CPU Render Path
-        if (!renderer) switchToSDLRenderer();
-        
-        Uint32 *pixels;
-        int pitch;
+            int p = y * calcWidth + x;
+            int iter = data[p];
 
-        SDL_LockTexture(texture, nullptr, (void **)&pixels, &pitch);
-
-        const auto &data = calculator->getData();
-
-        for (int y = 0; y < calcHeight; ++y)
-        {
-            for (int x = 0; x < calcWidth; ++x)
+            if (iter == MandelbrotCalculator::MAX_ITER)
             {
-                int p = y * calcWidth + x;
-                int iter = data[p];
+                pixels[y * (pitch / 4) + x] = 0xFF000000; // Black (Alpha=255)
+            }
+            else
+            {
+                double t = static_cast<double>(iter) / MandelbrotCalculator::MAX_ITER;
+                SDL_Color color = gradient->getColor(t);
 
-                if (iter == MandelbrotCalculator::MAX_ITER)
+                if (iter % 2 != 0)
                 {
-                    pixels[y * (pitch / 4) + x] = 0; // Black
+                    // Shift value (brightness) for odd iterations
+                    const int shift = 34;
+                    color.r = std::min(255, color.r + shift);
+                    color.g = std::min(255, color.g + shift);
+                    color.b = std::min(255, color.b + shift);
                 }
-                else
-                {
-                    double t = static_cast<double>(iter) / MandelbrotCalculator::MAX_ITER;
-                    SDL_Color color = gradient->getColor(t);
-
-                    if (iter % 2 != 0)
-                    {
-                        // Shift value (brightness) for odd iterations
-                        const int shift = 34;
-                        color.r = std::min(255, color.r + shift);
-                        color.g = std::min(255, color.g + shift);
-                        color.b = std::min(255, color.b + shift);
-                    }
-                    pixels[y * (pitch / 4) + x] = (color.r << 16) | (color.g << 8) | color.b;
-                }
+                // ARGB8888: A R G B
+                pixels[y * (pitch / 4) + x] = (0xFF << 24) | (color.r << 16) | (color.g << 8) | color.b;
             }
         }
-
-        SDL_UnlockTexture(texture);
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-        SDL_RenderPresent(renderer);
     }
+
+    SDL_UnlockTexture(texture);
+    
+    if (SDL_RenderClear(renderer) < 0) std::cerr << "RenderClear failed: " << SDL_GetError() << std::endl;
+    if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) < 0) std::cerr << "RenderCopy failed: " << SDL_GetError() << std::endl;
+    SDL_RenderPresent(renderer);
 }
 
 SDL_Rect MandelbrotApp::calculateSelectionRect(int startX, int startY, int endX, int endY, bool centerBased)
@@ -352,8 +344,9 @@ void MandelbrotApp::setPixelSize(int newSize)
     // Recreate texture
     if (texture)
         SDL_DestroyTexture(texture);
-    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
 
     if (!texture)
     {
@@ -361,8 +354,7 @@ void MandelbrotApp::setPixelSize(int newSize)
     }
 
     // Recompute
-    calculator->compute([this]()
-                        { this->render(); });
+    compute();
     render();
 
     std::cout << "Pixel size set to: " << pixelSize << " (" << calcWidth << "x" << calcHeight << ")" << std::endl;
@@ -417,8 +409,9 @@ void MandelbrotApp::handleResize(int newWidth, int newHeight)
     // Recreate texture with new dimensions
     if (texture)
         SDL_DestroyTexture(texture);
-    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888,
+    texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
 
     if (!texture)
     {
@@ -426,8 +419,7 @@ void MandelbrotApp::handleResize(int newWidth, int newHeight)
     }
 
     // Recompute with new dimensions
-    calculator->compute([this]()
-                        { this->render(); });
+    compute();
     render();
 
     std::cout << "Window resized to: " << width << "x" << height
@@ -563,15 +555,13 @@ void MandelbrotApp::zoomToRect(int x1, int y1, int x2, int y2, bool inverse)
     }
 
     calculator->reset();
-    calculator->compute([this]()
-                        { this->render(); });
+    compute();
     render();
 }
 
 void MandelbrotApp::run()
 {
-    calculator->compute([this]()
-                        { this->render(); });
+    compute();
     render();
 
     if (exitAfterFirstDisplay)
@@ -627,24 +617,21 @@ void MandelbrotApp::run()
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE)
                 {
                     calculator->reset();
-                    calculator->compute([this]()
-                                        { this->render(); });
+                    compute();
                     render();
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_r)
                 {
                     resetZoom();
                     calculator->reset();
-                    calculator->compute([this]()
-                                        { this->render(); });
+                    compute();
                     render();
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_h)
                 {
                     resetZoom();
                     calculator->reset();
-                    calculator->compute([this]
-                                        { this->render(); });
+                    compute();
                     render();
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_s)
@@ -688,8 +675,7 @@ void MandelbrotApp::run()
                     calculator->updateBounds(currentCre, currentCim, currentDiam);
                     
                     // Recompute with new calculator
-                    calculator->compute([this]
-                                        { this->render(); });
+                    compute();
                     render();
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_e)
@@ -721,19 +707,6 @@ void MandelbrotApp::run()
                     double currentCim = calculator->getCim();
                     double currentDiam = calculator->getDiam();
 
-                    // Destroy old calculator before switching context to ensure proper cleanup
-                    calculator.reset();
-
-                    // Switch graphics context if needed
-                    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
-                    {
-                        switchToOpenGL();
-                    }
-                    else
-                    {
-                        switchToSDLRenderer();
-                    }
-
                     // Recreate calculator based on engine type
                     if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
                     {
@@ -757,7 +730,7 @@ void MandelbrotApp::run()
                     }
                     
                     calculator->updateBounds(currentCre, currentCim, currentDiam);
-                    calculator->compute([this]() { this->render(); });
+                    compute();
                     render();
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_p)
@@ -894,8 +867,7 @@ void MandelbrotApp::run()
                 std::cout << "Switched to new random palette" << std::endl;
                 resetZoom();
                 calculator->reset();
-                calculator->compute([this]()
-                                    { this->render(); });
+                compute();
                 render();
             }
             else

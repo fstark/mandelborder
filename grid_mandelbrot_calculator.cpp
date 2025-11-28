@@ -168,7 +168,9 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
 
     unsigned long long totalComposites = 0; // Track how many times we composite
 
-    if (speedMode)
+    // GPU engine must run on the main thread (where the GL context is current)
+    // So we force sequential mode for GPU.
+    if (speedMode && engineType != EngineType::GPU)
     {
         // PARALLEL MODE: Compute all tiles in parallel using threads
         const int numTiles = gridRows * gridCols;
@@ -304,7 +306,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
     double milliseconds = duration.count() / 1000.0;
     double seconds = duration.count() / 1000000.0;
 
-    if (verboseMode && engineType != EngineType::GPU)
+    if (verboseMode)
     {
         unsigned totalPixels = width * height;
         double pixelsPerSec = seconds > 0 ? totalPixels / seconds : 0;
@@ -329,19 +331,11 @@ void GridMandelbrotCalculator::setEngineType(EngineType type)
 
 bool GridMandelbrotCalculator::hasOwnOutput() const
 {
-    // If any tile has own output (GPU), then the grid has own output
-    if (!tiles.empty() && tiles[0]->hasOwnOutput())
-        return true;
+    // No calculator has own output anymore
     return false;
 }
 
 void GridMandelbrotCalculator::render()
 {
-    // If we are in GPU mode, we likely want to render just the first tile 
-    // (assuming we set it up as 1x1 for GPU, or we just render all of them)
-    for (auto &tile : tiles)
-    {
-        if (tile->hasOwnOutput())
-            tile->render();
-    }
+    // Nothing to do here
 }

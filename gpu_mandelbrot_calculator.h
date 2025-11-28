@@ -17,18 +17,20 @@ public:
     void compute(std::function<void()> progressCallback) override;
     void reset() override;
     
-    // GPU implementation doesn't return data to CPU
-    const std::vector<int> &getData() const override { return dummyData; }
+    // GPU implementation now returns data to CPU
+    const std::vector<int> &getData() const override { return data; }
 
-    bool hasOwnOutput() const override { return true; }
-    void render() override;
+    // No longer has own output, behaves like standard calculator
+    bool hasOwnOutput() const override { return false; }
 
 private:
-    std::vector<int> dummyData;
+    std::vector<int> data;
     
     GLuint programId;
     GLuint vao;
     GLuint vbo;
+    GLuint fbo;
+    GLuint texture;
     
     // Shader uniforms
     GLint locMinR, locMinI, locMaxR, locMaxI;
@@ -36,5 +38,6 @@ private:
     
     void initShaders();
     void initGeometry();
+    void initFBO();
     GLuint compileShader(GLenum type, const std::string &source);
 };
