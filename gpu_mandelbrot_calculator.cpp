@@ -1,6 +1,7 @@
 #include "gpu_mandelbrot_calculator.h"
 #include <iostream>
 #include <vector>
+#include <chrono>
 
 GpuMandelbrotCalculator::GpuMandelbrotCalculator(int w, int h)
     : ZoomMandelbrotCalculator(w, h), programId(0), vao(0), vbo(0), fbo(0), texture(0)

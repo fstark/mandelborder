@@ -244,28 +244,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
                     progressCallback();
                 } });
 
-            // After each tile completes in normal mode, composite that tile's final state
-            const TileInfo &tile = tileInfos[tileIdx];
-            const auto &tileData = tiles[tileIdx]->getData();
-
-            for (int y = 0; y < tile.height; ++y)
-            {
-                int srcOffset = y * tile.width;
-                int dstOffset = (tile.startY + y) * width + tile.startX;
-
-                for (int x = 0; x < tile.width; ++x)
-                {
-                    data[dstOffset + x] = tileData[srcOffset + x];
-                }
-            }
-
-            totalComposites++;
-
-            // Trigger a render after each tile completes
-            if (progressCallback)
-            {
-                progressCallback();
-            }
+            // Note: tile compositing and render callback already handled in tile's compute callback above
 
             auto tileEndTime = std::chrono::high_resolution_clock::now();
             auto tileDuration = std::chrono::duration_cast<std::chrono::microseconds>(tileEndTime - tileStartTime);

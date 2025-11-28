@@ -36,30 +36,7 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engine
 
     initSDL();
 
-    // Create OpenGL context first (needed for GPU calculator)
-    glContext = SDL_GL_CreateContext(window);
-    if (!glContext)
-    {
-        throw std::runtime_error(std::string("OpenGL context creation failed: ") + SDL_GetError());
-    }
-    ownsGLContext = true;
-
-    // Make context current
-    if (SDL_GL_MakeCurrent(window, glContext) < 0)
-    {
-        throw std::runtime_error(std::string("Failed to make OpenGL context current: ") + SDL_GetError());
-    }
-
-    std::cout << "OpenGL context created successfully." << std::endl;
-    const char *glVersion = (const char *)glGetString(GL_VERSION);
-    if (glVersion)
-    {
-        std::cout << "OpenGL Version: " << glVersion << std::endl;
-    }
-
-    SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
-
-    // Now create renderer for display (this should work with existing GL context)
+    // Create renderer first (it will create its own OpenGL context if accelerated)
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
     {
@@ -71,6 +48,23 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engine
         }
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+
+    // Get the OpenGL context from the renderer (if it created one)
+    glContext = SDL_GL_GetCurrentContext();
+    if (glContext)
+    {
+        ownsGLContext = false; // We don't own it, the renderer does
+        std::cout << "Using OpenGL context from renderer." << std::endl;
+        const char *glVersion = (const char *)glGetString(GL_VERSION);
+        if (glVersion)
+        {
+            std::cout << "OpenGL Version: " << glVersion << std::endl;
+        }
+    }
+    else
+    {
+        std::cout << "No OpenGL context available (software renderer)." << std::endl;
+    }
 
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
@@ -162,34 +156,15 @@ void MandelbrotApp::compute()
 {
     auto startTime = std::chrono::high_resolution_clock::now();
 
-    SDL_GLContext originalContext = SDL_GL_GetCurrentContext();
-
-    // Only switch if we have a specific GL context for GPU and it's different from current
-    bool needSwitch = (currentEngineType == GridMandelbrotCalculator::EngineType::GPU && glContext && glContext != originalContext);
-
-    if (needSwitch)
+    // For GPU mode, ensure OpenGL context is current
+    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU && glContext)
     {
         SDL_GL_MakeCurrent(window, glContext);
     }
 
-    calculator->compute([this, originalContext, needSwitch, startTime]()
+    calculator->compute([this, startTime]()
                         {
-                            // If we switched, switch back for render
-                            if (needSwitch)
-                            {
-                                if (originalContext)
-                                    SDL_GL_MakeCurrent(this->window, originalContext);
-                                else
-                                    SDL_GL_MakeCurrent(this->window, NULL);
-                            }
-
                             this->render();
-
-                            // Switch back to compute context if we are continuing
-                            if (needSwitch)
-                            {
-                                SDL_GL_MakeCurrent(this->window, this->glContext);
-                            }
 
                             // Print timing if verbose mode is enabled
                             if (this->verboseMode)
@@ -198,15 +173,6 @@ void MandelbrotApp::compute()
                                 auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
                                 std::cout << "Compute + Render time: " << duration.count() << " ms" << std::endl;
                             } });
-
-    // Restore original context
-    if (needSwitch)
-    {
-        if (originalContext)
-            SDL_GL_MakeCurrent(window, originalContext);
-        else
-            SDL_GL_MakeCurrent(window, NULL);
-    }
 }
 
 void MandelbrotApp::render()
