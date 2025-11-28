@@ -5,9 +5,11 @@ Interactive Mandelbrot set renderer with multiple computation engines and real-t
 ## Build
 
 ```bash
+cd src
 make
-./mandelbrot_sdl2
 ```
+
+Binary is created in the project root: `../mandelbrot_sdl2`
 
 Dependencies: SDL2, OpenGL 3.2+
 
