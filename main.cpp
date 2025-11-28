@@ -10,6 +10,7 @@ int main(int argc, char *argv[])
         bool speedMode = false;
         bool exitAfterFirstDisplay = false;
         bool verboseMode = false;
+        std::string engineType = "gpu"; // default to GPU on this branch
 
         for (int i = 1; i < argc; ++i)
         {
@@ -28,6 +29,19 @@ int main(int argc, char *argv[])
                 verboseMode = true;
                 std::cout << "Verbose mode enabled" << std::endl;
             }
+            else if (strcmp(argv[i], "--engine") == 0)
+            {
+                if (i + 1 < argc)
+                {
+                    engineType = argv[++i];
+                    std::cout << "Engine type: " << engineType << std::endl;
+                }
+                else
+                {
+                    std::cerr << "Error: --engine requires an argument (border|standard|simd|gpu)" << std::endl;
+                    return 1;
+                }
+            }
             else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
             {
                 std::cout << "Usage: " << argv[0] << " [options]" << std::endl;
@@ -35,6 +49,7 @@ int main(int argc, char *argv[])
                 std::cout << "  --speed, -s         Enable speed mode (parallel computation)" << std::endl;
                 std::cout << "  --exit, -e          Exit after first display (for benchmarking)" << std::endl;
                 std::cout << "  --verbose, -v       Enable verbose output (timing info)" << std::endl;
+                std::cout << "  --engine <type>     Set engine type (border|standard|simd|gpu)" << std::endl;
                 std::cout << "  --help, -h          Show this help message" << std::endl;
                 return 0;
             }
@@ -43,7 +58,7 @@ int main(int argc, char *argv[])
         // Default resolution 800x600
         // Speed mode: 4x4 grid with parallel computation
         // Normal mode: 1x1 grid (single calculator) with progressive rendering
-        MandelbrotApp app(800, 600, speedMode);
+        MandelbrotApp app(800, 600, speedMode, engineType);
         
         if (exitAfterFirstDisplay)
         {

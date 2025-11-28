@@ -12,11 +12,25 @@
 #define GL_GLEXT_PROTOTYPES
 #include <SDL2/SDL_opengl.h>
 
-MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
+MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engineType)
     : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), glContext(nullptr), ownsGLContext(false),
       autoZoomActive(false), speedMode(speed), verboseMode(false), exitAfterFirstDisplay(false),
       currentEngineType(GridMandelbrotCalculator::EngineType::GPU)
 {
+    // Parse engine type
+    if (engineType == "border") {
+        currentEngineType = GridMandelbrotCalculator::EngineType::BORDER;
+    } else if (engineType == "standard") {
+        currentEngineType = GridMandelbrotCalculator::EngineType::STANDARD;
+    } else if (engineType == "simd") {
+        currentEngineType = GridMandelbrotCalculator::EngineType::SIMD;
+    } else if (engineType == "gpu") {
+        currentEngineType = GridMandelbrotCalculator::EngineType::GPU;
+    } else {
+        std::cerr << "Unknown engine type: " << engineType << ", defaulting to GPU" << std::endl;
+        currentEngineType = GridMandelbrotCalculator::EngineType::GPU;
+    }
+
     calcWidth = width / pixelSize;
     calcHeight = height / pixelSize;
 
@@ -146,6 +160,8 @@ void MandelbrotApp::initSDL()
 
 void MandelbrotApp::compute()
 {
+    auto startTime = std::chrono::high_resolution_clock::now();
+
     SDL_GLContext originalContext = SDL_GL_GetCurrentContext();
 
     // Only switch if we have a specific GL context for GPU and it's different from current
@@ -156,7 +172,7 @@ void MandelbrotApp::compute()
         SDL_GL_MakeCurrent(window, glContext);
     }
 
-    calculator->compute([this, originalContext, needSwitch]()
+    calculator->compute([this, originalContext, needSwitch, startTime]()
                         {
                             // If we switched, switch back for render
                             if (needSwitch)
@@ -173,6 +189,14 @@ void MandelbrotApp::compute()
                             if (needSwitch)
                             {
                                 SDL_GL_MakeCurrent(this->window, this->glContext);
+                            }
+
+                            // Print timing if verbose mode is enabled
+                            if (this->verboseMode)
+                            {
+                                auto endTime = std::chrono::high_resolution_clock::now();
+                                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+                                std::cout << "Compute + Render time: " << duration.count() << " ms" << std::endl;
                             } });
 
     // Restore original context

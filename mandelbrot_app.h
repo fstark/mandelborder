@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <vector>
 #include <memory>
+#include <string>
 #include "mandelbrot_calculator.h"
 #include "grid_mandelbrot_calculator.h"
 #include "zoom_point_chooser.h"
@@ -11,7 +12,7 @@
 class MandelbrotApp
 {
 public:
-    MandelbrotApp(int width, int height, bool speedMode = false);
+    MandelbrotApp(int width, int height, bool speedMode = false, const std::string& engineType = "gpu");
     ~MandelbrotApp();
 
     void run();

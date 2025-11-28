@@ -52,6 +52,8 @@ void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
         return;
     }
 
+    auto t0 = std::chrono::high_resolution_clock::now();
+
     // Bind FBO to render off-screen
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, width, height);
@@ -65,6 +67,8 @@ void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
     glUniform1d(locMaxI, maxi);
     glUniform1i(locMaxIter, MAX_ITER);
 
+    auto t1 = std::chrono::high_resolution_clock::now();
+
     // Draw full screen quad using VAO
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -72,10 +76,17 @@ void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
 
     glUseProgram(0);
 
+    // Force GPU to finish
+    glFinish();
+
+    auto t2 = std::chrono::high_resolution_clock::now();
+
     // Read back pixels
     // We read RGBA unsigned bytes
     std::vector<uint8_t> pixels(width * height * 4);
     glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+    auto t3 = std::chrono::high_resolution_clock::now();
 
     // Check for GL errors
     GLenum err;
@@ -117,6 +128,16 @@ void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
             dstRow[x] = iter;
         }
     }
+
+    auto t4 = std::chrono::high_resolution_clock::now();
+
+    // Always print timing for GPU to diagnose performance
+    auto setup = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+    auto render = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+    auto readback = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+    auto decode = std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count();
+    std::cout << "  [GPU] Setup: " << setup << "ms, Render: " << render 
+              << "ms, Readback: " << readback << "ms, Decode: " << decode << "ms" << std::endl;
 
     if (progressCallback)
         progressCallback();
