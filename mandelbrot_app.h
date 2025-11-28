@@ -36,6 +36,7 @@ private:
     bool speedMode;
     bool verboseMode;
     bool exitAfterFirstDisplay;
+    bool autoScreenshotMode;
     GridMandelbrotCalculator::EngineType currentEngineType;
 
     void initSDL();
@@ -54,4 +55,6 @@ private:
     void resetZoom();
     void setPixelSize(int newSize);
     bool isZoomDisabled() const;
+    void saveScreenshot(const std::string& basename = "mandelbrot");
+    std::string generateUniqueFilename(const std::string& basename, const std::string& extension);
 };

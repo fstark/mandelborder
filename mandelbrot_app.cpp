@@ -6,11 +6,16 @@
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
+#include <sstream>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
     : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), 
       autoZoomActive(false), speedMode(speed), verboseMode(false), exitAfterFirstDisplay(false),
-      currentEngineType(GridMandelbrotCalculator::EngineType::BORDER)
+      autoScreenshotMode(false), currentEngineType(GridMandelbrotCalculator::EngineType::BORDER)
 {
     calcWidth = width / pixelSize;
     calcHeight = height / pixelSize;
@@ -137,6 +142,12 @@ void MandelbrotApp::render()
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture, nullptr, nullptr);
     SDL_RenderPresent(renderer);
+    
+    // Auto-screenshot if mode is enabled
+    if (autoScreenshotMode)
+    {
+        saveScreenshot("mandelbrot");
+    }
 }
 
 SDL_Rect MandelbrotApp::calculateSelectionRect(int startX, int startY, int endX, int endY, bool centerBased)
@@ -525,7 +536,29 @@ void MandelbrotApp::run()
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_s)
                 {
-                    // Toggle speed mode
+                    // Check for Shift modifier
+                    SDL_Keymod modState = SDL_GetModState();
+                    if (modState & KMOD_SHIFT)
+                    {
+                        // Toggle auto-screenshot mode (Shift+S)
+                        autoScreenshotMode = !autoScreenshotMode;
+                        std::cout << "Auto-screenshot mode: " << (autoScreenshotMode ? "ON" : "OFF") << std::endl;
+                        
+                        // If we just enabled auto-screenshot, capture the current frame immediately
+                        if (autoScreenshotMode)
+                        {
+                            saveScreenshot("mandelbrot");
+                        }
+                    }
+                    else
+                    {
+                        // Save single screenshot (S)
+                        saveScreenshot("mandelbrot");
+                    }
+                }
+                else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_f)
+                {
+                    // Toggle fast/speed mode
                     speedMode = !speedMode;
                     
                     // Save current view parameters
@@ -541,7 +574,7 @@ void MandelbrotApp::run()
                         gridCalc->setVerboseMode(verboseMode);
                         gridCalc->setEngineType(currentEngineType);
                         calculator = std::move(gridCalc);
-                        std::cout << "Speed mode: ON (parallel 4x4 grid)" << std::endl;
+                        std::cout << "Fast mode: ON (parallel 4x4 grid)" << std::endl;
                     }
                     else
                     {
@@ -550,7 +583,7 @@ void MandelbrotApp::run()
                         gridCalc->setVerboseMode(verboseMode);
                         gridCalc->setEngineType(currentEngineType);
                         calculator = std::move(gridCalc);
-                        std::cout << "Speed mode: OFF (progressive 1x1)" << std::endl;
+                        std::cout << "Fast mode: OFF (progressive 1x1)" << std::endl;
                     }
                     calculator->updateBounds(currentCre, currentCim, currentDiam);
                     
@@ -605,7 +638,7 @@ void MandelbrotApp::run()
                     autoZoomActive = !autoZoomActive;
                     std::cout << "Auto-zoom: " << (autoZoomActive ? "ON" : "OFF") << std::endl;
                 }
-                else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_f)
+                else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_x)
                 {
                     int newSize = (pixelSize == 1) ? 10 : 1;
                     setPixelSize(newSize);
@@ -766,4 +799,99 @@ void MandelbrotApp::run()
 void MandelbrotApp::setExitAfterFirstDisplay(bool exit)
 {
     exitAfterFirstDisplay = exit;
+}
+
+std::string MandelbrotApp::generateUniqueFilename(const std::string& basename, const std::string& extension)
+{
+    // Generate timestamped base filename
+    time_t now = time(nullptr);
+    char timestamp[32];
+    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", localtime(&now));
+    
+    std::string baseFilename = basename + "_" + timestamp;
+    
+    // Always start with -000 suffix to ensure proper sorting
+    // Try suffixes -000 to -999
+    for (int i = 0; i <= 999; ++i)
+    {
+        std::ostringstream oss;
+        oss << baseFilename << "-" << std::setfill('0') << std::setw(3) << i << extension;
+        std::string filename = oss.str();
+        
+        std::ifstream testFile(filename);
+        if (!testFile.good())
+        {
+            // File doesn't exist, we can use this name
+            return filename;
+        }
+        testFile.close();
+    }
+    
+    // All 1000 variations (-000 to -999) exist, throw error
+    throw std::runtime_error("Cannot generate unique filename: too many files with timestamp " + 
+                           std::string(timestamp));
+}
+
+void MandelbrotApp::saveScreenshot(const std::string& basename)
+{
+    // Generate unique filename with timestamp
+    std::string filename;
+    try
+    {
+        filename = generateUniqueFilename(basename, ".png");
+    }
+    catch (const std::runtime_error& e)
+    {
+        std::cerr << "Failed to generate unique filename: " << e.what() << std::endl;
+        return;
+    }
+    
+    // Lock texture and read pixels
+    void* pixels;
+    int pitch;
+    if (SDL_LockTexture(texture, nullptr, &pixels, &pitch) != 0)
+    {
+        std::cerr << "Failed to lock texture: " << SDL_GetError() << std::endl;
+        return;
+    }
+    
+    // SDL_PIXELFORMAT_RGB888 is 4 bytes per pixel, but we need to convert to RGB (3 bytes)
+    // Allocate buffer for RGB data (3 bytes per pixel)
+    std::vector<unsigned char> rgbPixels(calcWidth * calcHeight * 3);
+    
+    // Convert from pixel format to RGB (3 bytes)
+    // The texture stores pixels as 32-bit integers: (R << 16) | (G << 8) | B
+    // On little-endian systems, bytes in memory are: B G R 0
+    unsigned char* src = static_cast<unsigned char*>(pixels);
+    unsigned char* dst = rgbPixels.data();
+    
+    for (int y = 0; y < calcHeight; ++y)
+    {
+        unsigned char* rowSrc = src + y * pitch;
+        for (int x = 0; x < calcWidth; ++x)
+        {
+            // On little-endian: bytes are B, G, R, 0
+            // We need R, G, B for PNG
+            *dst++ = rowSrc[2]; // R (third byte)
+            *dst++ = rowSrc[1]; // G (second byte)
+            *dst++ = rowSrc[0]; // B (first byte)
+            rowSrc += 4; // Move to next pixel (4 bytes per pixel in source)
+        }
+    }
+    
+    SDL_UnlockTexture(texture);
+    
+    // Save using stb_image_write (RGB format, 3 bytes per pixel)
+    // Pitch for RGB is simply width * 3
+    int result = stbi_write_png(filename.c_str(), calcWidth, calcHeight, 3, 
+                                 rgbPixels.data(), calcWidth * 3);
+    
+    if (result)
+    {
+        std::cout << "Screenshot saved: " << filename << std::endl;
+    }
+    else
+    {
+        std::cerr << "Failed to save screenshot: " << filename << std::endl;
+    }
 }

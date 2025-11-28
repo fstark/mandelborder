@@ -90,6 +90,14 @@ make run
 - **Mouse**: Click and drag to select a region to zoom into
 - **SPACE**: Recompute the current view
 - **R**: Reset zoom to full Mandelbrot set view
+- **S**: Save screenshot as PNG with timestamp
+- **Shift+S**: Toggle auto-screenshot mode (saves every frame)
+- **F**: Toggle fast mode (parallel 4x4 grid vs progressive rendering)
+- **P**: Change color palette
+- **E**: Cycle through render engines (BORDER/STANDARD/SIMD)
+- **A**: Toggle auto-zoom mode
+- **V**: Toggle verbose mode
+- **X**: Toggle pixel size (1x vs 10x for faster rendering)
 - **ESC**: Quit
 
 ## Customization
