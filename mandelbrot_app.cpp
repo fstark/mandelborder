@@ -22,9 +22,30 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
 
     initSDL();
 
-    // Initialize graphics context
-    // We need both SDL Renderer for display and OpenGL context for GPU computation
-    // Create renderer first
+    // Create OpenGL context first (needed for GPU calculator)
+    glContext = SDL_GL_CreateContext(window);
+    if (!glContext)
+    {
+        throw std::runtime_error(std::string("OpenGL context creation failed: ") + SDL_GetError());
+    }
+    ownsGLContext = true;
+
+    // Make context current
+    if (SDL_GL_MakeCurrent(window, glContext) < 0)
+    {
+        throw std::runtime_error(std::string("Failed to make OpenGL context current: ") + SDL_GetError());
+    }
+
+    std::cout << "OpenGL context created successfully." << std::endl;
+    const char *glVersion = (const char *)glGetString(GL_VERSION);
+    if (glVersion)
+    {
+        std::cout << "OpenGL Version: " << glVersion << std::endl;
+    }
+
+    SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
+
+    // Now create renderer for display (this should work with existing GL context)
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
     {
@@ -42,34 +63,6 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed)
     if (!texture)
     {
         throw std::runtime_error(std::string("Texture creation failed: ") + SDL_GetError());
-    }
-
-    // Create OpenGL context for GPU calculator
-    // Try to use existing context from renderer first
-    glContext = SDL_GL_GetCurrentContext();
-    if (glContext)
-    {
-        std::cout << "Using existing OpenGL context from renderer." << std::endl;
-        ownsGLContext = false;
-    }
-    else
-    {
-        std::cout << "No existing context, creating new one." << std::endl;
-        glContext = SDL_GL_CreateContext(window);
-        if (!glContext)
-        {
-            std::cerr << "Warning: Failed to create OpenGL context: " << SDL_GetError() << std::endl;
-        }
-        else
-        {
-            ownsGLContext = true;
-            std::cout << "OpenGL context created successfully." << std::endl;
-            // Make current to ensure it's active for initialization
-            if (SDL_GL_MakeCurrent(window, glContext) < 0) {
-                 std::cerr << "Warning: Failed to make OpenGL context current: " << SDL_GetError() << std::endl;
-            }
-            SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen context
-        }
     }
 
     // Speed mode: 4x4 grid with parallel computation
@@ -129,6 +122,12 @@ void MandelbrotApp::initSDL()
         throw std::runtime_error(std::string("SDL initialization failed: ") + SDL_GetError());
     }
 
+    // Set OpenGL attributes before creating window
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
     window = SDL_CreateWindow(
         "Mandelbrot Set - Boundary Tracing",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -148,7 +147,7 @@ void MandelbrotApp::initSDL()
 void MandelbrotApp::compute()
 {
     SDL_GLContext originalContext = SDL_GL_GetCurrentContext();
-    
+
     // Only switch if we have a specific GL context for GPU and it's different from current
     bool needSwitch = (currentEngineType == GridMandelbrotCalculator::EngineType::GPU && glContext && glContext != originalContext);
 
@@ -174,9 +173,8 @@ void MandelbrotApp::compute()
                             if (needSwitch)
                             {
                                 SDL_GL_MakeCurrent(this->window, this->glContext);
-                            }
-                        });
-                        
+                            } });
+
     // Restore original context
     if (needSwitch)
     {
@@ -192,9 +190,10 @@ void MandelbrotApp::render()
     // Ensure GL context is active for GPU computation if needed
     // But render() is for display. compute() is where the work happens.
     // Since we read back data, we always use the CPU render path (SDL Renderer)
-    
-    if (!renderer) return;
-    
+
+    if (!renderer)
+        return;
+
     Uint32 *pixels;
     int pitch;
 
@@ -233,9 +232,11 @@ void MandelbrotApp::render()
     }
 
     SDL_UnlockTexture(texture);
-    
-    if (SDL_RenderClear(renderer) < 0) std::cerr << "RenderClear failed: " << SDL_GetError() << std::endl;
-    if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) < 0) std::cerr << "RenderCopy failed: " << SDL_GetError() << std::endl;
+
+    if (SDL_RenderClear(renderer) < 0)
+        std::cerr << "RenderClear failed: " << SDL_GetError() << std::endl;
+    if (SDL_RenderCopy(renderer, texture, nullptr, nullptr) < 0)
+        std::cerr << "RenderCopy failed: " << SDL_GetError() << std::endl;
     SDL_RenderPresent(renderer);
 }
 
@@ -638,12 +639,12 @@ void MandelbrotApp::run()
                 {
                     // Toggle speed mode
                     speedMode = !speedMode;
-                    
+
                     // Save current view parameters
                     double currentCre = calculator->getCre();
                     double currentCim = calculator->getCim();
                     double currentDiam = calculator->getDiam();
-                    
+
                     // Recreate calculator with appropriate grid size
                     if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
                     {
@@ -673,7 +674,7 @@ void MandelbrotApp::run()
                         std::cout << "Speed mode: OFF (progressive 1x1)" << std::endl;
                     }
                     calculator->updateBounds(currentCre, currentCim, currentDiam);
-                    
+
                     // Recompute with new calculator
                     compute();
                     render();
@@ -728,7 +729,7 @@ void MandelbrotApp::run()
                         gridCalc->setEngineType(currentEngineType);
                         calculator = std::move(gridCalc);
                     }
-                    
+
                     calculator->updateBounds(currentCre, currentCim, currentDiam);
                     compute();
                     render();

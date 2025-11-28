@@ -4,12 +4,15 @@ MAKEFLAGS += -j 8
 
 CXX = g++
 CXXFLAGS = -std=c++23 -Wall -O3 -march=native -ftree-vectorize $(shell sdl2-config --cflags)
-LDFLAGS = $(shell sdl2-config --libs) -lGL
+LDFLAGS = $(shell sdl2-config --libs)
 
-# Linux specific flags
+# Platform specific flags
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
-    LDFLAGS += -lm
+    LDFLAGS += -lGL -lm
+endif
+ifeq ($(UNAME_S),Darwin)
+    LDFLAGS += -framework OpenGL
 endif
 
 TARGET = mandelbrot_sdl2

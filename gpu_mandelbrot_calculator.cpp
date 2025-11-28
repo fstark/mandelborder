@@ -6,18 +6,22 @@ GpuMandelbrotCalculator::GpuMandelbrotCalculator(int w, int h)
     : ZoomMandelbrotCalculator(w, h), programId(0), vao(0), vbo(0), fbo(0), texture(0)
 {
     data.resize(width * height);
-    
+
     // We assume an OpenGL context is already active when this is created
-    
+
     // Check if context is active
-    if (!glGetString(GL_VERSION)) {
+    if (!glGetString(GL_VERSION))
+    {
         std::cerr << "CRITICAL ERROR: No active OpenGL context in GpuMandelbrotCalculator constructor!" << std::endl;
     }
-    
-    const char* version = (const char*)glGetString(GL_VERSION);
-    if (version) {
+
+    const char *version = (const char *)glGetString(GL_VERSION);
+    if (version)
+    {
         std::cout << "GL Version: " << version << std::endl;
-    } else {
+    }
+    else
+    {
         std::cerr << "Failed to get GL Version" << std::endl;
     }
 
@@ -28,15 +32,22 @@ GpuMandelbrotCalculator::GpuMandelbrotCalculator(int w, int h)
 
 GpuMandelbrotCalculator::~GpuMandelbrotCalculator()
 {
-    if (programId) glDeleteProgram(programId);
-    if (vbo) glDeleteBuffers(1, &vbo);
-    if (fbo) glDeleteFramebuffers(1, &fbo);
-    if (texture) glDeleteTextures(1, &texture);
+    if (programId)
+        glDeleteProgram(programId);
+    if (vao)
+        glDeleteVertexArrays(1, &vao);
+    if (vbo)
+        glDeleteBuffers(1, &vbo);
+    if (fbo)
+        glDeleteFramebuffers(1, &fbo);
+    if (texture)
+        glDeleteTextures(1, &texture);
 }
 
 void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
 {
-    if (!programId || !fbo) {
+    if (!programId || !fbo)
+    {
         std::cerr << "Program or FBO missing." << std::endl;
         return;
     }
@@ -54,73 +65,63 @@ void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
     glUniform1d(locMaxI, maxi);
     glUniform1i(locMaxIter, MAX_ITER);
 
-    // Draw full screen quad
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
-
+    // Draw full screen quad using VAO
+    glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindVertexArray(0);
 
-    glDisableVertexAttribArray(0);
     glUseProgram(0);
-    
+
     // Read back pixels
     // We read RGBA unsigned bytes
     std::vector<uint8_t> pixels(width * height * 4);
     glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    
+
     // Check for GL errors
     GLenum err;
-    while ((err = glGetError()) != GL_NO_ERROR) {
+    while ((err = glGetError()) != GL_NO_ERROR)
+    {
         std::cerr << "OpenGL Error during readback: " << err << std::endl;
     }
-    
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // Convert pixels to iteration counts
     // Shader encodes: R = low byte, G = high byte
-    // Note: OpenGL reads bottom-up, but our shader flips Y, so we might need to adjust or not.
-    // The shader flips Y: float texY = 1.0 - texCoord.y;
-    // This means the image is rendered "upside down" relative to GL coords, which matches CPU top-down?
-    // Let's check:
-    // CPU: y=0 is top.
-    // GL Texture: (0,0) is bottom-left.
-    // Shader: texCoord.y goes 0..1 (bottom to top).
-    // texY = 1.0 - texCoord.y goes 1..0 (top to bottom).
-    // So if we render with this, the top of the image (complex plane minI) corresponds to texCoord.y=1 (top of texture).
-    // glReadPixels reads from bottom row (y=0) to top row.
-    // So the first row in 'pixels' is the bottom of the image.
-    // But our CPU buffer expects y=0 to be top.
-    // So we need to flip Y when reading back.
+    // The shader already flips Y coordinate: cy = minI + (1.0 - texCoord.y) * (maxI - minI)
+    // This means texCoord.y=0 (bottom of GL texture) maps to maxI (bottom of complex plane)
+    // and texCoord.y=1 (top of GL texture) maps to minI (top of complex plane)
+    // glReadPixels reads from y=0 (bottom) to y=height-1 (top) in GL coordinates
+    // We want our data buffer to have y=0 at top (minI), so we flip during readback
 
     for (int y = 0; y < height; ++y)
     {
-        // Read from bottom-up (GL standard)
-        // Write to top-down (CPU standard)
-        // Actually, if we want to match CPU, we want row 0 to be top.
-        // glReadPixels row 0 is bottom.
-        // So src row y corresponds to dst row (height - 1 - y).
-        
-        const uint8_t* srcRow = &pixels[y * width * 4];
-        int* dstRow = &data[(height - 1 - y) * width];
+        // glReadPixels gives us bottom row first (y=0 in GL = bottom)
+        // We want top row first (y=0 in CPU = top = minI)
+        // So flip: GL row y -> CPU row (height-1-y)
+
+        const uint8_t *srcRow = &pixels[y * width * 4];
+        int *dstRow = &data[(height - 1 - y) * width];
 
         for (int x = 0; x < width; ++x)
         {
             uint8_t r = srcRow[x * 4 + 0];
             uint8_t g = srcRow[x * 4 + 1];
             // uint8_t b = srcRow[x * 4 + 2];
-            
+
             // Decode iteration count
             int iter = r + (g * 256);
-            if (iter > MAX_ITER) iter = MAX_ITER;
-            
+            if (iter > MAX_ITER)
+                iter = MAX_ITER;
+
             dstRow[x] = iter;
         }
     }
-    
+
     if (progressCallback)
         progressCallback();
-}void GpuMandelbrotCalculator::reset()
+}
+void GpuMandelbrotCalculator::reset()
 {
     // Nothing to reset for GPU
 }
@@ -138,7 +139,8 @@ void GpuMandelbrotCalculator::initFBO()
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
 
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
         std::cerr << "Framebuffer is not complete!" << std::endl;
     }
 
@@ -150,14 +152,23 @@ void GpuMandelbrotCalculator::initGeometry()
     // Full screen quad coordinates (-1 to 1)
     float vertices[] = {
         -1.0f, -1.0f,
-         1.0f, -1.0f,
-        -1.0f,  1.0f,
-         1.0f,  1.0f
-    };
+        1.0f, -1.0f,
+        -1.0f, 1.0f,
+        1.0f, 1.0f};
+
+    // Create and bind VAO (required for Core Profile)
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
 
     glGenBuffers(1, &vbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    // Setup vertex attribute
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+
+    glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
@@ -192,8 +203,10 @@ void GpuMandelbrotCalculator::initShaders()
         void main() {
             // Map texture coordinate [0,1] to complex plane
             // Use double precision for the mapping
+            // Note: texCoord.y=0 is bottom in OpenGL, but we want y=0 to be top (mini)
+            // So we flip: use (1.0 - texCoord.y)
             double cx = minR + double(texCoord.x) * (maxR - minR);
-            double cy = minI + double(texCoord.y) * (maxI - minI);
+            double cy = minI + double(1.0 - texCoord.y) * (maxI - minI);
             
             double zx = 0.0;
             double zy = 0.0;
@@ -236,15 +249,16 @@ void GpuMandelbrotCalculator::initShaders()
     programId = glCreateProgram();
     glAttachShader(programId, vs);
     glAttachShader(programId, fs);
-    
+
     // Bind attribute location before linking
     glBindAttribLocation(programId, 0, "position");
-    
+
     glLinkProgram(programId);
 
     GLint linked;
     glGetProgramiv(programId, GL_LINK_STATUS, &linked);
-    if (!linked) {
+    if (!linked)
+    {
         char log[512];
         glGetProgramInfoLog(programId, 512, NULL, log);
         std::cerr << "Shader Linking Error: " << log << std::endl;
@@ -270,7 +284,8 @@ GLuint GpuMandelbrotCalculator::compileShader(GLenum type, const std::string &so
 
     GLint compiled;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    if (!compiled) {
+    if (!compiled)
+    {
         char log[512];
         glGetShaderInfoLog(shader, 512, NULL, log);
         std::cerr << "Shader Compilation Error (" << (type == GL_VERTEX_SHADER ? "VS" : "FS") << "): " << log << std::endl;
