@@ -11,10 +11,13 @@
 class GridMandelbrotCalculator : public StorageMandelbrotCalculator
 {
 public:
-    enum class EngineType {
+    enum class EngineType
+    {
         BORDER,
         STANDARD,
-        SIMD
+        SIMD,
+        GPUF, // GPU with float precision
+        GPUD  // GPU with double precision
     };
 
     GridMandelbrotCalculator(int width, int height, int gridRows, int gridCols);
@@ -25,9 +28,13 @@ public:
     void reset() override;
 
     void setSpeedMode(bool mode) override;
-    
+
     void setEngineType(EngineType type);
     EngineType getEngineType() const { return engineType; }
+
+    // Override to handle GPU pass-through
+    bool hasOwnOutput() const override;
+    void render() override;
 
 private:
     int gridRows;
@@ -40,9 +47,9 @@ private:
     // Helper structures to track tile geometry
     struct TileInfo
     {
-        int startX, startY;  // Starting pixel position
-        int width, height;   // Tile dimensions in pixels
-        double minR, minI;   // Complex plane bounds
+        int startX, startY; // Starting pixel position
+        int width, height;  // Tile dimensions in pixels
+        double minR, minI;  // Complex plane bounds
         double maxR, maxI;
     };
     std::vector<TileInfo> tileInfos;

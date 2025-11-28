@@ -1,5 +1,6 @@
 #include "grid_mandelbrot_calculator.h"
 #include "simd_mandelbrot_calculator.h"
+#include "gpu_mandelbrot_calculator.h"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -64,12 +65,31 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
     {
         const TileInfo &tile = tileInfos[i];
         std::unique_ptr<MandelbrotCalculator> calculator;
-        
-        if (engineType == EngineType::STANDARD) {
+
+        if (engineType == EngineType::STANDARD)
+        {
             calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
-        } else if (engineType == EngineType::SIMD) {
+        }
+        else if (engineType == EngineType::SIMD)
+        {
             calculator = std::make_unique<SimdMandelbrotCalculator>(tile.width, tile.height);
-        } else {
+        }
+        else if (engineType == EngineType::GPUF)
+        {
+            // For GPU, we only want ONE calculator, not a grid.
+            // But if we are in this loop, we are creating tiles.
+            // We'll handle this by making the GPU calculator only for the first tile
+            // and making others dummy or empty if we are forced to be in a grid.
+            // Ideally, GridMandelbrotCalculator should detect GPU mode and not use tiles.
+            // For now, let's just create it.
+            calculator = std::make_unique<GpuMandelbrotCalculator>(tile.width, tile.height, GpuMandelbrotCalculator::Precision::FLOAT);
+        }
+        else if (engineType == EngineType::GPUD)
+        {
+            calculator = std::make_unique<GpuMandelbrotCalculator>(tile.width, tile.height, GpuMandelbrotCalculator::Precision::DOUBLE);
+        }
+        else
+        {
             calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
         }
 
@@ -94,12 +114,25 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
     {
         const TileInfo &tile = tileInfos[i];
         std::unique_ptr<MandelbrotCalculator> calculator;
-        
-        if (engineType == EngineType::STANDARD) {
+
+        if (engineType == EngineType::STANDARD)
+        {
             calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
-        } else if (engineType == EngineType::SIMD) {
+        }
+        else if (engineType == EngineType::SIMD)
+        {
             calculator = std::make_unique<SimdMandelbrotCalculator>(tile.width, tile.height);
-        } else {
+        }
+        else if (engineType == EngineType::GPUF)
+        {
+            calculator = std::make_unique<GpuMandelbrotCalculator>(tile.width, tile.height, GpuMandelbrotCalculator::Precision::FLOAT);
+        }
+        else if (engineType == EngineType::GPUD)
+        {
+            calculator = std::make_unique<GpuMandelbrotCalculator>(tile.width, tile.height, GpuMandelbrotCalculator::Precision::DOUBLE);
+        }
+        else
+        {
             calculator = std::make_unique<BorderMandelbrotCalculator>(tile.width, tile.height);
         }
 
@@ -157,12 +190,14 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
 
     unsigned long long totalComposites = 0; // Track how many times we composite
 
-    if (speedMode)
+    // GPU engine must run on the main thread (where the GL context is current)
+    // So we force sequential mode for GPU.
+    if (speedMode && engineType != EngineType::GPUF && engineType != EngineType::GPUD)
     {
         // PARALLEL MODE: Compute all tiles in parallel using threads
         const int numTiles = gridRows * gridCols;
         const unsigned int numThreads = std::thread::hardware_concurrency();
-        
+
         // Lambda to process a range of tiles
         auto processTiles = [this](int startIdx, int endIdx)
         {
@@ -171,22 +206,22 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
                 tiles[tileIdx]->compute(nullptr);
             }
         };
-        
+
         // Create threads and distribute tiles among them
         std::vector<std::thread> threads;
         int tilesPerThread = (numTiles + numThreads - 1) / numThreads; // Ceiling division
-        
+
         for (unsigned int t = 0; t < numThreads; ++t)
         {
             int startIdx = t * tilesPerThread;
             int endIdx = std::min(startIdx + tilesPerThread, numTiles);
-            
+
             if (startIdx < numTiles)
             {
                 threads.emplace_back(processTiles, startIdx, endIdx);
             }
         }
-        
+
         // Wait for all threads to complete
         for (auto &thread : threads)
         {
@@ -231,28 +266,7 @@ void GridMandelbrotCalculator::compute(std::function<void()> progressCallback)
                     progressCallback();
                 } });
 
-            // After each tile completes in normal mode, composite that tile's final state
-            const TileInfo &tile = tileInfos[tileIdx];
-            const auto &tileData = tiles[tileIdx]->getData();
-
-            for (int y = 0; y < tile.height; ++y)
-            {
-                int srcOffset = y * tile.width;
-                int dstOffset = (tile.startY + y) * width + tile.startX;
-
-                for (int x = 0; x < tile.width; ++x)
-                {
-                    data[dstOffset + x] = tileData[srcOffset + x];
-                }
-            }
-
-            totalComposites++;
-
-            // Trigger a render after each tile completes
-            if (progressCallback)
-            {
-                progressCallback();
-            }
+            // Note: tile compositing and render callback already handled in tile's compute callback above
 
             auto tileEndTime = std::chrono::high_resolution_clock::now();
             auto tileDuration = std::chrono::duration_cast<std::chrono::microseconds>(tileEndTime - tileStartTime);
@@ -314,4 +328,15 @@ void GridMandelbrotCalculator::setEngineType(EngineType type)
         // Re-initialize calculators with new type
         updateBounds(cre, cim, diam);
     }
+}
+
+bool GridMandelbrotCalculator::hasOwnOutput() const
+{
+    // No calculator has own output anymore
+    return false;
+}
+
+void GridMandelbrotCalculator::render()
+{
+    // Nothing to do here
 }

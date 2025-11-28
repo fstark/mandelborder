@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <vector>
 #include <memory>
+#include <string>
 #include "mandelbrot_calculator.h"
 #include "grid_mandelbrot_calculator.h"
 #include "zoom_point_chooser.h"
@@ -11,11 +12,12 @@
 class MandelbrotApp
 {
 public:
-    MandelbrotApp(int width, int height, bool speedMode = false);
+    MandelbrotApp(int width, int height, bool speedMode = false, const std::string& engineType = "gpu");
     ~MandelbrotApp();
 
     void run();
     void setExitAfterFirstDisplay(bool exit);
+    void setVerboseMode(bool verbose);
 
 private:
     int width;
@@ -27,6 +29,8 @@ private:
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture;
+    SDL_GLContext glContext; // OpenGL context for GPU rendering
+    bool ownsGLContext;      // Whether we own the context and should delete it
 
     std::unique_ptr<MandelbrotCalculator> calculator;
     std::unique_ptr<ZoomPointChooser> zoomChooser;
@@ -40,8 +44,11 @@ private:
     GridMandelbrotCalculator::EngineType currentEngineType;
 
     void initSDL();
+    void switchToOpenGL();
+    void switchToSDLRenderer();
     void createCalculator();
     void render();
+    void compute(); // Helper to handle context switching
     void handleResize(int newWidth, int newHeight);
 
     // Interaction helpers
