@@ -38,7 +38,7 @@ int main(int argc, char *argv[])
                 }
                 else
                 {
-                    std::cerr << "Error: --engine requires an argument (border|standard|simd|gpu)" << std::endl;
+                    std::cerr << "Error: --engine requires an argument (border|standard|simd|gpuf|gpud)" << std::endl;
                     return 1;
                 }
             }
@@ -49,7 +49,9 @@ int main(int argc, char *argv[])
                 std::cout << "  --speed, -s         Enable speed mode (parallel computation)" << std::endl;
                 std::cout << "  --exit, -e          Exit after first display (for benchmarking)" << std::endl;
                 std::cout << "  --verbose, -v       Enable verbose output (timing info)" << std::endl;
-                std::cout << "  --engine <type>     Set engine type (border|standard|simd|gpu)" << std::endl;
+                std::cout << "  --engine <type>     Set engine type (border|standard|simd|gpuf|gpud)" << std::endl;
+                std::cout << "                      gpuf = GPU with float precision (fast)" << std::endl;
+                std::cout << "                      gpud = GPU with double precision (accurate)" << std::endl;
                 std::cout << "  --help, -h          Show this help message" << std::endl;
                 return 0;
             }
@@ -59,7 +61,7 @@ int main(int argc, char *argv[])
         // Speed mode: 4x4 grid with parallel computation
         // Normal mode: 1x1 grid (single calculator) with progressive rendering
         MandelbrotApp app(800, 600, speedMode, engineType);
-        
+
         if (exitAfterFirstDisplay)
         {
             app.setExitAfterFirstDisplay(true);
@@ -69,7 +71,7 @@ int main(int argc, char *argv[])
         {
             app.setVerboseMode(true);
         }
-        
+
         app.run();
     }
     catch (const std::exception &e)

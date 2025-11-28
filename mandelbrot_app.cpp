@@ -12,23 +12,36 @@
 #define GL_GLEXT_PROTOTYPES
 #include <SDL2/SDL_opengl.h>
 
-MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engineType)
+MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engineType)
     : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), glContext(nullptr), ownsGLContext(false),
       autoZoomActive(false), speedMode(speed), verboseMode(false), exitAfterFirstDisplay(false),
-      currentEngineType(GridMandelbrotCalculator::EngineType::GPU)
+      currentEngineType(GridMandelbrotCalculator::EngineType::GPUF)
 {
     // Parse engine type
-    if (engineType == "border") {
+    if (engineType == "border")
+    {
         currentEngineType = GridMandelbrotCalculator::EngineType::BORDER;
-    } else if (engineType == "standard") {
+    }
+    else if (engineType == "standard")
+    {
         currentEngineType = GridMandelbrotCalculator::EngineType::STANDARD;
-    } else if (engineType == "simd") {
+    }
+    else if (engineType == "simd")
+    {
         currentEngineType = GridMandelbrotCalculator::EngineType::SIMD;
-    } else if (engineType == "gpu") {
-        currentEngineType = GridMandelbrotCalculator::EngineType::GPU;
-    } else {
-        std::cerr << "Unknown engine type: " << engineType << ", defaulting to GPU" << std::endl;
-        currentEngineType = GridMandelbrotCalculator::EngineType::GPU;
+    }
+    else if (engineType == "gpuf" || engineType == "gpu")
+    {
+        currentEngineType = GridMandelbrotCalculator::EngineType::GPUF;
+    }
+    else if (engineType == "gpud")
+    {
+        currentEngineType = GridMandelbrotCalculator::EngineType::GPUD;
+    }
+    else
+    {
+        std::cerr << "Unknown engine type: " << engineType << ", defaulting to GPUF" << std::endl;
+        currentEngineType = GridMandelbrotCalculator::EngineType::GPUF;
     }
 
     calcWidth = width / pixelSize;
@@ -36,7 +49,30 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engine
 
     initSDL();
 
-    // Create renderer first (it will create its own OpenGL context if accelerated)
+    // Always create OpenGL context since window has SDL_WINDOW_OPENGL flag
+    // This allows switching to GPU engines at runtime
+    glContext = SDL_GL_CreateContext(window);
+    if (!glContext)
+    {
+        throw std::runtime_error(std::string("OpenGL context creation failed: ") + SDL_GetError());
+    }
+    ownsGLContext = true;
+
+    if (SDL_GL_MakeCurrent(window, glContext) < 0)
+    {
+        throw std::runtime_error(std::string("Failed to make OpenGL context current: ") + SDL_GetError());
+    }
+
+    std::cout << "OpenGL context created successfully." << std::endl;
+    const char *glVersion = (const char *)glGetString(GL_VERSION);
+    if (glVersion)
+    {
+        std::cout << "OpenGL Version: " << glVersion << std::endl;
+    }
+
+    SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
+
+    // Create renderer for display
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
     {
@@ -49,23 +85,6 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engine
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
-    // Get the OpenGL context from the renderer (if it created one)
-    glContext = SDL_GL_GetCurrentContext();
-    if (glContext)
-    {
-        ownsGLContext = false; // We don't own it, the renderer does
-        std::cout << "Using OpenGL context from renderer." << std::endl;
-        const char *glVersion = (const char *)glGetString(GL_VERSION);
-        if (glVersion)
-        {
-            std::cout << "OpenGL Version: " << glVersion << std::endl;
-        }
-    }
-    else
-    {
-        std::cout << "No OpenGL context available (software renderer)." << std::endl;
-    }
-
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
     if (!texture)
@@ -75,7 +94,8 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string& engine
 
     // Speed mode: 4x4 grid with parallel computation
     // Normal mode: 1x1 grid (effectively single calculator) with progressive rendering
-    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
+    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
+        currentEngineType == GridMandelbrotCalculator::EngineType::GPUD)
     {
         // GPU always uses 1x1 grid
         auto gridCalc = std::make_unique<GridMandelbrotCalculator>(calcWidth, calcHeight, 1, 1);
@@ -157,7 +177,9 @@ void MandelbrotApp::compute()
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // For GPU mode, ensure OpenGL context is current
-    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU && glContext)
+    if ((currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
+         currentEngineType == GridMandelbrotCalculator::EngineType::GPUD) &&
+        glContext)
     {
         SDL_GL_MakeCurrent(window, glContext);
     }
@@ -304,7 +326,8 @@ void MandelbrotApp::setPixelSize(int newSize)
     calcHeight = height / pixelSize;
 
     // Recreate calculator with appropriate grid size based on speed mode
-    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
+    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
+        currentEngineType == GridMandelbrotCalculator::EngineType::GPUD)
     {
         auto gridCalc = std::make_unique<GridMandelbrotCalculator>(calcWidth, calcHeight, 1, 1);
         gridCalc->setSpeedMode(speedMode);
@@ -368,7 +391,8 @@ void MandelbrotApp::handleResize(int newWidth, int newHeight)
     calcHeight = height / pixelSize;
 
     // Recreate calculator with appropriate grid size based on speed mode
-    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
+    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
+        currentEngineType == GridMandelbrotCalculator::EngineType::GPUD)
     {
         auto gridCalc = std::make_unique<GridMandelbrotCalculator>(calcWidth, calcHeight, 1, 1);
         gridCalc->setSpeedMode(speedMode);
@@ -636,7 +660,8 @@ void MandelbrotApp::run()
                     double currentDiam = calculator->getDiam();
 
                     // Recreate calculator with appropriate grid size
-                    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
+                    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
+                        currentEngineType == GridMandelbrotCalculator::EngineType::GPUD)
                     {
                         auto gridCalc = std::make_unique<GridMandelbrotCalculator>(calcWidth, calcHeight, 1, 1);
                         gridCalc->setSpeedMode(speedMode);
@@ -684,8 +709,13 @@ void MandelbrotApp::run()
                     }
                     else if (currentEngineType == GridMandelbrotCalculator::EngineType::SIMD)
                     {
-                        currentEngineType = GridMandelbrotCalculator::EngineType::GPU;
-                        std::cout << "Switched to GPU engine" << std::endl;
+                        currentEngineType = GridMandelbrotCalculator::EngineType::GPUF;
+                        std::cout << "Switched to GPUF (GPU float) engine" << std::endl;
+                    }
+                    else if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF)
+                    {
+                        currentEngineType = GridMandelbrotCalculator::EngineType::GPUD;
+                        std::cout << "Switched to GPUD (GPU double) engine" << std::endl;
                     }
                     else
                     {
@@ -699,9 +729,11 @@ void MandelbrotApp::run()
                     double currentDiam = calculator->getDiam();
 
                     // Recreate calculator based on engine type
-                    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPU)
+                    if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
+                        currentEngineType == GridMandelbrotCalculator::EngineType::GPUD)
                     {
                         // GPU mode always uses 1x1 grid
+                        // OpenGL context is already created at startup
                         auto gridCalc = std::make_unique<GridMandelbrotCalculator>(calcWidth, calcHeight, 1, 1);
                         gridCalc->setSpeedMode(speedMode);
                         gridCalc->setVerboseMode(verboseMode);

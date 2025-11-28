@@ -11,12 +11,18 @@
 class GpuMandelbrotCalculator : public ZoomMandelbrotCalculator
 {
 public:
-    GpuMandelbrotCalculator(int width, int height);
+    enum class Precision
+    {
+        FLOAT,
+        DOUBLE
+    };
+
+    GpuMandelbrotCalculator(int width, int height, Precision precision = Precision::FLOAT);
     ~GpuMandelbrotCalculator();
 
     void compute(std::function<void()> progressCallback) override;
     void reset() override;
-    
+
     // GPU implementation now returns data to CPU
     const std::vector<int> &getData() const override { return data; }
 
@@ -25,17 +31,18 @@ public:
 
 private:
     std::vector<int> data;
-    
+    Precision precision;
+
     GLuint programId;
     GLuint vao;
     GLuint vbo;
     GLuint fbo;
     GLuint texture;
-    
+
     // Shader uniforms
     GLint locMinR, locMinI, locMaxR, locMaxI;
     GLint locMaxIter;
-    
+
     void initShaders();
     void initGeometry();
     void initFBO();

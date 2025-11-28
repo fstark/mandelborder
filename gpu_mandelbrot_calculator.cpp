@@ -3,8 +3,8 @@
 #include <vector>
 #include <chrono>
 
-GpuMandelbrotCalculator::GpuMandelbrotCalculator(int w, int h)
-    : ZoomMandelbrotCalculator(w, h), programId(0), vao(0), vbo(0), fbo(0), texture(0)
+GpuMandelbrotCalculator::GpuMandelbrotCalculator(int w, int h, Precision prec)
+    : ZoomMandelbrotCalculator(w, h), precision(prec), programId(0), vao(0), vbo(0), fbo(0), texture(0)
 {
     data.resize(width * height);
 
@@ -137,7 +137,7 @@ void GpuMandelbrotCalculator::compute(std::function<void()> progressCallback)
     auto render = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
     auto readback = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
     auto decode = std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count();
-    std::cout << "  [GPU] Setup: " << setup << "ms, Render: " << render 
+    std::cout << "  [GPU] Setup: " << setup << "ms, Render: " << render
               << "ms, Readback: " << readback << "ms, Decode: " << decode << "ms" << std::endl;
 
     if (progressCallback)
@@ -196,6 +196,11 @@ void GpuMandelbrotCalculator::initGeometry()
 
 void GpuMandelbrotCalculator::initShaders()
 {
+    // Configure precision type for shader based on constructor parameter
+    // float:  ~45ms on Intel integrated GPU, precision good to zoom ~1e-6
+    // double: ~545ms on Intel integrated GPU, precision good to zoom ~1e-15
+    const char *precisionType = (precision == Precision::FLOAT) ? "float" : "double";
+
     // Vertex Shader - GLSL 4.0 Core
     const std::string vsSource = R"(
         #version 400 core
@@ -208,9 +213,10 @@ void GpuMandelbrotCalculator::initShaders()
         }
     )";
 
-    // Fragment Shader - GLSL 4.0 Core with Double Precision
+    // Fragment Shader - GLSL 4.0 Core with configurable precision
     // Encodes iteration count into RGBA
-    const std::string fsSource = R"(
+    // $PRECISION_TYPE will be replaced by C++ code before compilation
+    std::string fsSourceTemplate = R"(
         #version 400 core
         
         uniform double minR;
@@ -224,26 +230,26 @@ void GpuMandelbrotCalculator::initShaders()
         
         void main() {
             // Map texture coordinate [0,1] to complex plane
-            // Use double precision for the mapping
+            // Convert double uniforms to computation precision
             // Note: texCoord.y=0 is bottom in OpenGL, but we want y=0 to be top (mini)
             // So we flip: use (1.0 - texCoord.y)
-            double cx = minR + double(texCoord.x) * (maxR - minR);
-            double cy = minI + double(1.0 - texCoord.y) * (maxI - minI);
+            $PRECISION_TYPE cx = $PRECISION_TYPE(minR) + $PRECISION_TYPE(texCoord.x) * $PRECISION_TYPE(maxR - minR);
+            $PRECISION_TYPE cy = $PRECISION_TYPE(minI) + $PRECISION_TYPE(1.0 - texCoord.y) * $PRECISION_TYPE(maxI - minI);
             
-            double zx = 0.0;
-            double zy = 0.0;
-            double zx2 = 0.0;
-            double zy2 = 0.0;
+            $PRECISION_TYPE zx = $PRECISION_TYPE(0.0);
+            $PRECISION_TYPE zy = $PRECISION_TYPE(0.0);
+            $PRECISION_TYPE zx2 = $PRECISION_TYPE(0.0);
+            $PRECISION_TYPE zy2 = $PRECISION_TYPE(0.0);
             
             int iter = 0;
             // We can use a dynamic loop in GLSL 4.0
             for (int i = 0; i < maxIter; ++i) {
-                if (zx2 + zy2 > 4.0) {
+                if (zx2 + zy2 > $PRECISION_TYPE(4.0)) {
                     iter = i;
                     break;
                 }
                 
-                zy = 2.0 * zx * zy + cy;
+                zy = $PRECISION_TYPE(2.0) * zx * zy + cy;
                 zx = zx2 - zy2 + cx;
                 zx2 = zx * zx;
                 zy2 = zy * zy;
@@ -251,7 +257,7 @@ void GpuMandelbrotCalculator::initShaders()
             }
             
             // If we reached the end, it's inside the set
-            if (iter == maxIter - 1 && zx2 + zy2 <= 4.0) {
+            if (iter == maxIter - 1 && zx2 + zy2 <= $PRECISION_TYPE(4.0)) {
                 iter = maxIter;
             }
             
@@ -264,6 +270,15 @@ void GpuMandelbrotCalculator::initShaders()
             fragColor = vec4(r, g, 0.0, 1.0);
         }
     )";
+
+    // Replace $PRECISION_TYPE with the actual type
+    std::string fsSource = fsSourceTemplate;
+    size_t pos = 0;
+    while ((pos = fsSource.find("$PRECISION_TYPE", pos)) != std::string::npos)
+    {
+        fsSource.replace(pos, 15, precisionType);
+        pos += strlen(precisionType);
+    }
 
     GLuint vs = compileShader(GL_VERTEX_SHADER, vsSource);
     GLuint fs = compileShader(GL_FRAGMENT_SHADER, fsSource);
