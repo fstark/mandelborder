@@ -54,30 +54,7 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engine
 
     initSDL();
 
-    // Always create OpenGL context since window has SDL_WINDOW_OPENGL flag
-    // This allows switching to GPU engines at runtime
-    glContext = SDL_GL_CreateContext(window);
-    if (!glContext)
-    {
-        throw std::runtime_error(std::string("OpenGL context creation failed: ") + SDL_GetError());
-    }
-    ownsGLContext = true;
-
-    if (SDL_GL_MakeCurrent(window, glContext) < 0)
-    {
-        throw std::runtime_error(std::string("Failed to make OpenGL context current: ") + SDL_GetError());
-    }
-
-    std::cout << "OpenGL context created successfully." << std::endl;
-    const char *glVersion = (const char *)glGetString(GL_VERSION);
-    if (glVersion)
-    {
-        std::cout << "OpenGL Version: " << glVersion << std::endl;
-    }
-
-    SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
-
-    // Create renderer for display
+    // Create renderer first (it will create its own OpenGL context if accelerated)
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
     {
@@ -89,6 +66,24 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engine
         }
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+
+    // Get the OpenGL context from the renderer (if it created one)
+    glContext = SDL_GL_GetCurrentContext();
+    if (glContext)
+    {
+        ownsGLContext = false; // We don't own it, the renderer does
+        std::cout << "Using OpenGL context from renderer." << std::endl;
+        const char *glVersion = (const char *)glGetString(GL_VERSION);
+        if (glVersion)
+        {
+            std::cout << "OpenGL Version: " << glVersion << std::endl;
+        }
+        SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
+    }
+    else
+    {
+        std::cout << "No OpenGL context available (software renderer)." << std::endl;
+    }
 
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);

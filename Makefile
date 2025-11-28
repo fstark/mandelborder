@@ -4,6 +4,7 @@ MAKEFLAGS += -j 8
 
 CXX = g++
 CXXFLAGS = -std=c++23 -Wall -O3 -march=native -ftree-vectorize $(shell sdl2-config --cflags)
+CXXFLAGS_DEBUG = -std=c++23 -Wall -O0 -g $(shell sdl2-config --cflags)
 LDFLAGS = $(shell sdl2-config --libs)
 
 # Platform specific flags
@@ -27,10 +28,13 @@ $(TARGET): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+debug: CXXFLAGS = $(CXXFLAGS_DEBUG)
+debug: clean $(TARGET)
+
 clean:
 	rm -f $(TARGET) $(OBJS)
 
 run: $(TARGET)
 	./$(TARGET)
 
-.PHONY: all clean run
+.PHONY: all clean run debug
