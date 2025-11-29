@@ -12,7 +12,7 @@
 class MandelbrotApp
 {
 public:
-    MandelbrotApp(int width, int height, bool speedMode = false, const std::string& engineType = "gpu");
+    MandelbrotApp(int width, int height, bool speedMode = false, const std::string &engineType = "gpu");
     ~MandelbrotApp();
 
     void run();
@@ -64,6 +64,6 @@ private:
     void blinkRect(int x, int y, int w, int h, int times = 3, int blinkDelay = 150);
     void resetZoom();
     bool isZoomDisabled() const;
-    void saveScreenshot(const std::string& basename = "mandelbrot");
-    std::string generateUniqueFilename(const std::string& basename, const std::string& extension);
+    void saveScreenshot(const std::string &basename = "mandelbrot");
+    std::string generateUniqueFilename(const std::string &basename, const std::string &extension);
 };

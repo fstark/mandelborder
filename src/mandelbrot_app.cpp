@@ -56,6 +56,18 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engine
 
     initSDL();
 
+#ifdef __APPLE__
+    // On macOS, the renderer uses Metal, so we need to create an OpenGL context explicitly
+    glContext = SDL_GL_CreateContext(window);
+    if (!glContext)
+    {
+        throw std::runtime_error(std::string("OpenGL context creation failed: ") + SDL_GetError());
+    }
+    ownsGLContext = true;
+    SDL_GL_MakeCurrent(window, glContext);
+    SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
+#endif
+
     // Create renderer first (it will create its own OpenGL context if accelerated)
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer)
@@ -69,13 +81,21 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engine
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
-    // Get the OpenGL context from the renderer (if it created one)
+#ifdef __APPLE__
+    // Make sure OpenGL context is still current after renderer creation
+    if (glContext)
+    {
+        SDL_GL_MakeCurrent(window, glContext);
+    }
+#else
+    // On Linux, get the OpenGL context from the renderer (if it created one)
     glContext = SDL_GL_GetCurrentContext();
     if (glContext)
     {
         ownsGLContext = false; // We don't own it, the renderer does
         SDL_GL_SetSwapInterval(0); // Disable VSync for offscreen rendering
     }
+#endif
 
     texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                 SDL_TEXTUREACCESS_STREAMING, calcWidth, calcHeight);
@@ -739,8 +759,7 @@ void MandelbrotApp::run()
                     if (currentEngineType == GridMandelbrotCalculator::EngineType::GPUF ||
                         currentEngineType == GridMandelbrotCalculator::EngineType::GPUD)
                     {
-                        // GPU mode always uses 1x1 grid
-                        // OpenGL context is already created at startup
+                        // GPU mode always uses 1x1 grid - ensure OpenGL context is ready
                         auto gridCalc = std::make_unique<GridMandelbrotCalculator>(calcWidth, calcHeight, 1, 1);
                         gridCalc->setSpeedMode(speedMode);
                         gridCalc->setEngineType(currentEngineType);
