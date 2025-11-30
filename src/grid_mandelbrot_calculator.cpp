@@ -1,6 +1,8 @@
 #include "grid_mandelbrot_calculator.h"
 #include "simd_mandelbrot_calculator.h"
 #include "gpu_mandelbrot_calculator.h"
+#include "standard_mandelbrot_calculator.h"
+#include "standard_newton_calculator.h"
 #include <format>
 #include <thread>
 #include <vector>
@@ -64,7 +66,8 @@ void GridMandelbrotCalculator::updateBounds(double new_cre, double new_cim, doub
 
         if (engineType == EngineType::STANDARD)
         {
-            calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+            // calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+            calculator = std::make_unique<StandardNewtonCalculator>(tile.width, tile.height);
         }
         else if (engineType == EngineType::SIMD)
         {
@@ -113,7 +116,8 @@ void GridMandelbrotCalculator::updateBoundsExplicit(double new_minr, double new_
 
         if (engineType == EngineType::STANDARD)
         {
-            calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+         //   calculator = std::make_unique<StandardMandelbrotCalculator>(tile.width, tile.height);
+          calculator = std::make_unique<StandardNewtonCalculator>(tile.width, tile.height);
         }
         else if (engineType == EngineType::SIMD)
         {
@@ -174,6 +178,7 @@ void GridMandelbrotCalculator::compositeData()
 
             for (int x = 0; x < tile.width; ++x)
             {
+             
                 data[dstOffset + x] = tileData[srcOffset + x];
             }
         }

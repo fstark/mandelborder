@@ -215,6 +215,8 @@ void MandelbrotApp::compute()
     }
 }
 
+Uint32 newtoncolors[] = { 0xFFFF0000,0xFF00FF00,0xFF0000FF};
+
 void MandelbrotApp::render()
 {
     // Ensure GL context is active for GPU computation if needed
@@ -237,7 +239,9 @@ void MandelbrotApp::render()
         {
             int p = y * calcWidth + x;
             int iter = data[p];
-
+// newton mode
+pixels[y * (pitch / 4) + x] = newtoncolors[iter%3];
+continue;
             if (iter == MandelbrotCalculator::MAX_ITER)
             {
                 pixels[y * (pitch / 4) + x] = 0xFF000000; // Black (Alpha=255)
