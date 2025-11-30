@@ -48,9 +48,9 @@ StandardNewtonCalculator::StandardNewtonCalculator(int w, int h)
 
 int StandardNewtonCalculator::iterate(double x, double y) {
   vec2 z = vec2(x, y);
-  for (int i = 0;i < 16
+  for (int i = 0;i < MAX_ITER
     ; ++i) {
-    z = complexDivide(function(z), derivative(z));
+    z = complexAdd(z, complexScale(-1.0, complexDivide(function(z), derivative(z))));
   }
   double distr0 = complexDistance(z, Root0);
   double distr1 = complexDistance(z, Root1);
