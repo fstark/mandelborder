@@ -38,12 +38,15 @@ private:
     std::unique_ptr<MandelbrotCalculator> calculator;
     std::unique_ptr<ZoomPointChooser> zoomChooser;
     std::unique_ptr<Gradient> gradient;
+    CyclingGradient* cyclingGradient; // Pointer to the cycling gradient wrapper (not owned)
 
     bool autoZoomActive;
     bool speedMode;
     bool verboseMode;
     bool exitAfterFirstDisplay;
     bool autoScreenshotMode;
+    bool cyclingActive;
+    double cyclingStep; // +0.01 for forward, -0.01 for reverse
     GridMandelbrotCalculator::EngineType currentEngineType;
 
     void initSDL();

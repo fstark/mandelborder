@@ -22,7 +22,7 @@
 MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engineType)
     : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), glContext(nullptr), ownsGLContext(false),
       autoZoomActive(false), speedMode(speed), verboseMode(false), exitAfterFirstDisplay(false),
-      autoScreenshotMode(false), currentEngineType(GridMandelbrotCalculator::EngineType::BORDER)
+      autoScreenshotMode(false), cyclingActive(false), cyclingStep(0.003), currentEngineType(GridMandelbrotCalculator::EngineType::BORDER)
 {
     // Parse engine type
     if (engineType == "border")
@@ -137,7 +137,10 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engine
 
     // Initialize gradient with default polynomial (non-swapped)
     // Use fixed polynomial: r(t) = 9*(1-t)*t³*255, g(t) = 15*(1-t)²*t²*255, b(t) = 8.5*(1-t)³*t*255
-    gradient = std::make_unique<PolynomialGradient>(9.0, 15.0, 8.5);
+    auto baseGradient = std::make_unique<PolynomialGradient>(9.0, 15.0, 8.5);
+    auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+    cyclingGradient = cycling.get();
+    gradient = std::move(cycling);
 }
 
 MandelbrotApp::~MandelbrotApp()
@@ -594,6 +597,8 @@ void MandelbrotApp::run()
     std::cout << "  Shift+S  - Toggle auto-screenshot mode" << std::endl;
     std::cout << "  E        - Cycle engine (Border→Standard→SIMD→GPU-Float→GPU-Double)" << std::endl;
     std::cout << "  P        - Random palette" << std::endl;
+    std::cout << "  C        - Toggle palette cycling animation (forward)" << std::endl;
+    std::cout << "  Shift+C  - Toggle palette cycling animation (reverse)" << std::endl;
     std::cout << "  V        - Toggle verbose mode" << std::endl;
     std::cout << "  A        - Toggle auto-zoom" << std::endl;
     std::cout << "  X        - Toggle pixel size (1x or 10x)" << std::endl;
@@ -782,8 +787,29 @@ void MandelbrotApp::run()
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_p)
                 {
-                    gradient = Gradient::createRandom();
+                    // Create random gradient and wrap it in cycling gradient
+                    auto baseGradient = Gradient::createRandom();
+                    auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+                    cyclingGradient = cycling.get();
+                    gradient = std::move(cycling);
+                    cyclingActive = false; // Reset cycling when changing palette
                     render();
+                }
+                else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c)
+                {
+                    // Check for Shift modifier to determine direction
+                    SDL_Keymod modState = SDL_GetModState();
+                    bool shiftPressed = (modState & KMOD_SHIFT) != 0;
+                    cyclingStep = shiftPressed ? -0.003 : 0.003;
+                    
+                    // Toggle cycling animation
+                    cyclingActive = !cyclingActive;
+                    if (!cyclingActive)
+                    {
+                        // Reset offset to 0 when stopping
+                        cyclingGradient->setOffset(0.0);
+                        render();
+                    }
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_v)
                 {
@@ -900,13 +926,26 @@ void MandelbrotApp::run()
             }
         }
 
+        // Cycling animation functionality
+        if (cyclingActive)
+        {
+            // Increment or decrement the cycle offset
+            double currentOffset = cyclingGradient->getOffset();
+            cyclingGradient->setOffset(currentOffset + cyclingStep);
+            render();
+        }
+
         // Auto-zoom functionality
         if (autoZoomActive)
         {
             // Check if zoom is disabled, reset to home if so
             if (isZoomDisabled())
             {
-                gradient = Gradient::createRandom();
+                auto baseGradient = Gradient::createRandom();
+                auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+                cyclingGradient = cycling.get();
+                gradient = std::move(cycling);
+                cyclingActive = false;
                 resetZoom();
                 calculator->reset();
                 compute();
@@ -1063,5 +1102,9 @@ void MandelbrotApp::setAutoZoom(bool enabled)
 
 void MandelbrotApp::setRandomPalette()
 {
-    gradient = Gradient::createRandom();
+    auto baseGradient = Gradient::createRandom();
+    auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+    cyclingGradient = cycling.get();
+    gradient = std::move(cycling);
+    cyclingActive = false;
 }

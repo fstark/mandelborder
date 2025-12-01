@@ -125,7 +125,7 @@ void BorderMandelbrotCalculator::compute(std::function<void()> progressCallback)
     while (queueTail != queueHead)
     {
         unsigned p;
-        if (queueHead <= queueTail || ++flag & 3)
+        if (queueHead <= queueTail || ++flag & 3 )
         {
             // FIFO: dequeue from tail
             p = queue[queueTail++];

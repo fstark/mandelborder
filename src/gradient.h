@@ -80,4 +80,23 @@ public:
     static std::unique_ptr<ChannelSwapGradient> createRandom(std::unique_ptr<Gradient> gradient);
 };
 
+/**
+ * A gradient adapter that cycles the underlying gradient by a fixed offset.
+ * Values wrap around (e.g., 1.1 becomes 0.1, -0.2 becomes 0.8).
+ */
+class CyclingGradient : public Gradient
+{
+private:
+    std::unique_ptr<Gradient> innerGradient;
+    double offset;
+
+public:
+    CyclingGradient(std::unique_ptr<Gradient> gradient, double offset);
+
+    SDL_Color getColor(double t) const override;
+    
+    double getOffset() const { return offset; }
+    void setOffset(double newOffset) { offset = newOffset; }
+};
+
 #endif // GRADIENT_H

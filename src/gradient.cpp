@@ -148,3 +148,19 @@ std::unique_ptr<ChannelSwapGradient> ChannelSwapGradient::createRandom(std::uniq
         permutation[1],
         permutation[2]);
 }
+
+CyclingGradient::CyclingGradient(std::unique_ptr<Gradient> gradient, double offset)
+    : innerGradient(std::move(gradient)), offset(offset)
+{
+}
+
+SDL_Color CyclingGradient::getColor(double t) const
+{
+    // Apply offset and wrap to [0, 1)
+    double cycledT = t + offset;
+    
+    // Normalize to [0, 1) range
+    cycledT = cycledT - std::floor(cycledT);
+    
+    return innerGradient->getColor(cycledT);
+}
