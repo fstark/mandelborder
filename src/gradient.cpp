@@ -164,3 +164,39 @@ SDL_Color CyclingGradient::getColor(double t) const
     
     return innerGradient->getColor(cycledT);
 }
+
+MixGradient::MixGradient(std::unique_ptr<Gradient> first, std::unique_ptr<Gradient> second, double mix)
+    : firstGradient(std::move(first)), secondGradient(std::move(second)), mixValue(mix)
+{
+}
+
+SDL_Color MixGradient::getColor(double t) const
+{
+    // Get colors from both gradients
+    SDL_Color firstColor = firstGradient->getColor(t);
+    SDL_Color secondColor = secondGradient->getColor(t);
+    
+    // Mix the colors: mixValue*first + (1-mixValue)*second
+    double r = mixValue * firstColor.r + (1.0 - mixValue) * secondColor.r;
+    double g = mixValue * firstColor.g + (1.0 - mixValue) * secondColor.g;
+    double b = mixValue * firstColor.b + (1.0 - mixValue) * secondColor.b;
+    
+    return {clamp(r), clamp(g), clamp(b), 255};
+}
+
+void MixGradient::setFirstGradient(std::unique_ptr<Gradient> newFirst)
+{
+    firstGradient = std::move(newFirst);
+}
+
+void MixGradient::setSecondGradient(std::unique_ptr<Gradient> newSecond)
+{
+    secondGradient = std::move(newSecond);
+}
+
+void MixGradient::transitionToNewFirst(std::unique_ptr<Gradient> newFirst)
+{
+    // Move current first to second, then set new first
+    secondGradient = std::move(firstGradient);
+    firstGradient = std::move(newFirst);
+}

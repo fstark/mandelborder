@@ -39,6 +39,7 @@ private:
     std::unique_ptr<ZoomPointChooser> zoomChooser;
     std::unique_ptr<Gradient> gradient;
     CyclingGradient* cyclingGradient; // Pointer to the cycling gradient wrapper (not owned)
+    MixGradient* mixGradient; // Pointer to the mix gradient wrapper (not owned)
 
     bool autoZoomActive;
     bool speedMode;
@@ -47,6 +48,7 @@ private:
     bool autoScreenshotMode;
     bool cyclingActive;
     double cyclingStep; // +0.01 for forward, -0.01 for reverse
+    bool mixAnimating;
     GridMandelbrotCalculator::EngineType currentEngineType;
 
     void initSDL();

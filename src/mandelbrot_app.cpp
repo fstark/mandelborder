@@ -22,7 +22,7 @@
 MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engineType)
     : width(w), height(h), pixelSize(1), window(nullptr), renderer(nullptr), texture(nullptr), glContext(nullptr), ownsGLContext(false),
       autoZoomActive(false), speedMode(speed), verboseMode(false), exitAfterFirstDisplay(false),
-      autoScreenshotMode(false), cyclingActive(false), cyclingStep(0.003), currentEngineType(GridMandelbrotCalculator::EngineType::BORDER)
+      autoScreenshotMode(false), cyclingActive(false), cyclingStep(0.003), mixAnimating(false), currentEngineType(GridMandelbrotCalculator::EngineType::BORDER)
 {
     // Parse engine type
     if (engineType == "border")
@@ -135,10 +135,16 @@ MandelbrotApp::MandelbrotApp(int w, int h, bool speed, const std::string &engine
     // Initialize random seed first
     srand(static_cast<unsigned>(time(nullptr)));
 
-    // Initialize gradient with default polynomial (non-swapped)
-    // Use fixed polynomial: r(t) = 9*(1-t)*t³*255, g(t) = 15*(1-t)²*t²*255, b(t) = 8.5*(1-t)³*t*255
-    auto baseGradient = std::make_unique<PolynomialGradient>(9.0, 15.0, 8.5);
-    auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+        // Initialize gradient with structure: cycling -> mix -> (first, second)
+    // Create initial first gradient (the main palette)
+    auto firstGradient = std::make_unique<PolynomialGradient>(9.0, 15.0, 8.5);
+    // Create initial second gradient (same as first, for smooth transitions)
+    auto secondGradient = std::make_unique<PolynomialGradient>(9.0, 15.0, 8.5);
+    // Wrap in mix gradient (starting at 1.0 = 100% first)
+    auto mix = std::make_unique<MixGradient>(std::move(firstGradient), std::move(secondGradient), 1.0);
+    mixGradient = mix.get();
+    // Wrap in cycling gradient
+    auto cycling = std::make_unique<CyclingGradient>(std::move(mix), 0.0);
     cyclingGradient = cycling.get();
     gradient = std::move(cycling);
 }
@@ -597,6 +603,7 @@ void MandelbrotApp::run()
     std::cout << "  Shift+S  - Toggle auto-screenshot mode" << std::endl;
     std::cout << "  E        - Cycle engine (Border→Standard→SIMD→GPU-Float→GPU-Double)" << std::endl;
     std::cout << "  P        - Random palette" << std::endl;
+    std::cout << "  Shift+P  - Smooth palette shift to new random palette" << std::endl;
     std::cout << "  C        - Toggle palette cycling animation (forward)" << std::endl;
     std::cout << "  Shift+C  - Toggle palette cycling animation (reverse)" << std::endl;
     std::cout << "  V        - Toggle verbose mode" << std::endl;
@@ -787,12 +794,32 @@ void MandelbrotApp::run()
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_p)
                 {
-                    // Create random gradient and wrap it in cycling gradient
-                    auto baseGradient = Gradient::createRandom();
-                    auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
-                    cyclingGradient = cycling.get();
-                    gradient = std::move(cycling);
-                    cyclingActive = false; // Reset cycling when changing palette
+                    // Check if SHIFT is pressed for smooth palette transition
+                    SDL_Keymod modState = SDL_GetModState();
+                    bool shiftPressed = (modState & KMOD_SHIFT) != 0;
+                    
+                    if (shiftPressed)
+                    {
+                        // Shift+P: Smooth palette transition
+                        // Move old first to second, create new first, set mixValue=0
+                        auto newFirst = Gradient::createRandom();
+                        mixGradient->transitionToNewFirst(std::move(newFirst));
+                        mixGradient->setMixValue(0.0);
+                        mixAnimating = true;
+                    }
+                    else
+                    {
+                        // P: Instant palette change (keep same structure: cycling -> mix -> (first, second))
+                        auto newFirst = Gradient::createRandom();
+                        auto newSecond = Gradient::createRandom();
+                        auto mix = std::make_unique<MixGradient>(std::move(newFirst), std::move(newSecond), 1.0);
+                        mixGradient = mix.get();
+                        auto cycling = std::make_unique<CyclingGradient>(std::move(mix), 0.0);
+                        cyclingGradient = cycling.get();
+                        gradient = std::move(cycling);
+                        cyclingActive = false; // Reset cycling when changing palette
+                        mixAnimating = false;
+                    }
                     render();
                 }
                 else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_c)
@@ -926,6 +953,20 @@ void MandelbrotApp::run()
             }
         }
 
+        // Mix animation functionality
+        if (mixAnimating)
+        {
+            double currentMix = mixGradient->getMixValue();
+            currentMix += 0.05;
+            if (currentMix >= 1.0)
+            {
+                currentMix = 1.0;
+                mixAnimating = false;
+            }
+            mixGradient->setMixValue(currentMix);
+            render();
+        }
+
         // Cycling animation functionality
         if (cyclingActive)
         {
@@ -941,11 +982,16 @@ void MandelbrotApp::run()
             // Check if zoom is disabled, reset to home if so
             if (isZoomDisabled())
             {
-                auto baseGradient = Gradient::createRandom();
-                auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+                // Maintain structure: cycling -> mix -> (first, second)
+                auto firstGradient = Gradient::createRandom();
+                auto secondGradient = Gradient::createRandom();
+                auto mix = std::make_unique<MixGradient>(std::move(firstGradient), std::move(secondGradient), 1.0);
+                mixGradient = mix.get();
+                auto cycling = std::make_unique<CyclingGradient>(std::move(mix), 0.0);
                 cyclingGradient = cycling.get();
                 gradient = std::move(cycling);
                 cyclingActive = false;
+                mixAnimating = false;
                 resetZoom();
                 calculator->reset();
                 compute();
@@ -1102,9 +1148,14 @@ void MandelbrotApp::setAutoZoom(bool enabled)
 
 void MandelbrotApp::setRandomPalette()
 {
-    auto baseGradient = Gradient::createRandom();
-    auto cycling = std::make_unique<CyclingGradient>(std::move(baseGradient), 0.0);
+    // Maintain structure: cycling -> mix -> (first, second)
+    auto firstGradient = Gradient::createRandom();
+    auto secondGradient = Gradient::createRandom();
+    auto mix = std::make_unique<MixGradient>(std::move(firstGradient), std::move(secondGradient), 1.0);
+    mixGradient = mix.get();
+    auto cycling = std::make_unique<CyclingGradient>(std::move(mix), 0.0);
     cyclingGradient = cycling.get();
     gradient = std::move(cycling);
     cyclingActive = false;
+    mixAnimating = false;
 }

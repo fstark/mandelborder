@@ -99,4 +99,33 @@ public:
     void setOffset(double newOffset) { offset = newOffset; }
 };
 
+/**
+ * A gradient adapter that mixes two underlying gradients.
+ * At mixValue=0, returns 100% of secondGradient.
+ * At mixValue=1, returns 100% of firstGradient.
+ * At mixValue=t, returns t*firstGradient + (1-t)*secondGradient.
+ */
+class MixGradient : public Gradient
+{
+private:
+    std::unique_ptr<Gradient> firstGradient;
+    std::unique_ptr<Gradient> secondGradient;
+    double mixValue;
+
+public:
+    MixGradient(std::unique_ptr<Gradient> first, std::unique_ptr<Gradient> second, double mix = 1.0);
+
+    SDL_Color getColor(double t) const override;
+    
+    double getMixValue() const { return mixValue; }
+    void setMixValue(double newMix) { mixValue = newMix; }
+    
+    // Replace the first gradient with a new one
+    void setFirstGradient(std::unique_ptr<Gradient> newFirst);
+    // Replace the second gradient with a new one
+    void setSecondGradient(std::unique_ptr<Gradient> newSecond);
+    // Move first to second, and set new first
+    void transitionToNewFirst(std::unique_ptr<Gradient> newFirst);
+};
+
 #endif // GRADIENT_H
